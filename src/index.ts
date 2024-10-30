@@ -29,8 +29,37 @@ const grafana = new pg.Pool({
 	port: parseInt(process.env.GRAFANA_DB_PORT || '5432', 10),
 });
 
-const iDempiereFileNamePattern = /idempiere\.(\d{4})-(\d{2})-(\d{2})_\d+.log$/;
+// Ensure the process doesn't terminate by checking for and sending batch updates
 let psqlInsertsToSend: IdempiereLog[] = [];
+setInterval(() => {
+	// If we're currently saving or there's nothing to send, be done
+	if (isAQueryInProcess || !psqlInsertsToSend.length) {
+		return;
+	}
+	isAQueryInProcess = true;
+	let psqlInsertsBeingSent = [...psqlInsertsToSend];
+	isAQueryInProcess = true;
+	let variableCounter = 1;
+	let valuesStatement = psqlInsertsBeingSent
+		.map((record) => '(' + record.map(() => '$' + variableCounter++).join(',') + ')')
+		.join(',');
+	console.log('saving ' + psqlInsertsBeingSent.length + ' records');
+	grafana
+		.query(
+			`insert into ${process.env
+				.GRAFANA_TABLE!} (log_time, query_type, query_name, duration, variables, ad_client_id, ad_org_id, record_uu) VALUES` +
+				valuesStatement +
+				' ON CONFLICT DO NOTHING',
+			psqlInsertsBeingSent.flatMap((record) => record),
+		)
+		.then(() => {
+			console.log('successfully saved records');
+			psqlInsertsToSend.splice(0, psqlInsertsBeingSent.length);
+			isAQueryInProcess = false;
+		});
+}, 5000);
+
+const iDempiereFileNamePattern = /idempiere\.(\d{4})-(\d{2})-(\d{2})_\d+.log$/;
 let fileNames = readdirSync(process.env.IDEMPIERE_LOG_DIRECTORY).filter((fileName) =>
 	iDempiereFileNamePattern.test(fileName),
 );
@@ -109,35 +138,6 @@ watch(process.env.IDEMPIERE_LOG_DIRECTORY, {
 		console.log('file was removed, so no longer watching it: ' + file);
 		delete watchedFiles[file];
 	});
-
-// Ensure the process doesn't terminate by checking for and sending batch updates
-setInterval(() => {
-	// If we're currently saving or there's nothing to send, be done
-	if (isAQueryInProcess || !psqlInsertsToSend.length) {
-		return;
-	}
-	isAQueryInProcess = true;
-	let psqlInsertsBeingSent = [...psqlInsertsToSend];
-	isAQueryInProcess = true;
-	let variableCounter = 1;
-	let valuesStatement = psqlInsertsBeingSent
-		.map((record) => '(' + record.map(() => '$' + variableCounter++).join(',') + ')')
-		.join(',');
-	console.log('saving ' + psqlInsertsBeingSent.length + ' records');
-	grafana
-		.query(
-			`insert into ${process.env
-				.GRAFANA_TABLE!} (log_time, query_type, query_name, duration, variables, ad_client_id, ad_org_id, record_uu) VALUES` +
-				valuesStatement +
-				' ON CONFLICT DO NOTHING',
-			psqlInsertsBeingSent.flatMap((record) => record),
-		)
-		.then(() => {
-			console.log('successfully saved records');
-			psqlInsertsToSend.splice(0, psqlInsertsBeingSent.length);
-			isAQueryInProcess = false;
-		});
-}, 5000);
 
 // Clean up if the process needs to exit
 process.on('uncaughtException', (err, origin) => {
