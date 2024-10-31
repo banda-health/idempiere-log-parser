@@ -55,6 +55,11 @@ setInterval(() => {
 		.then(() => {
 			console.log('successfully saved records');
 			psqlInsertsToSend.splice(0, psqlInsertsBeingSent.length);
+		})
+		.catch((error) => {
+			console.log('error saving records: ' + error);
+		})
+		.finally(() => {
 			isAQueryInProcess = false;
 		});
 }, 5000);
