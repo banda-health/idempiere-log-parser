@@ -37,7 +37,8 @@ setInterval(() => {
 		return;
 	}
 	isAQueryInProcess = true;
-	let psqlInsertsBeingSent = [...psqlInsertsToSend];
+	// Don't send more than 5000 at a time
+	let psqlInsertsBeingSent = [...psqlInsertsToSend.slice(0, 5000)];
 	isAQueryInProcess = true;
 	let variableCounter = 1;
 	let valuesStatement = psqlInsertsBeingSent
