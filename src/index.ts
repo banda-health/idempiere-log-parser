@@ -129,7 +129,7 @@ watch(process.env.IDEMPIERE_LOG_DIRECTORY, {
 	ignored: (file, stats) => !!stats?.isFile() && !file.endsWith('.log'),
 	ignoreInitial: true,
 })
-	.on('change', (file) => handleFileChange)
+	.on('change', handleFileChange)
 	.on('add', (file) => {
 		console.log('new log file: ' + file, ' - removing watches on others...');
 		Object.keys(watchedFiles).forEach((watchedFile) => {
