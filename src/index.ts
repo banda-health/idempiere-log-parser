@@ -29,30 +29,36 @@ const grafana = new pg.Pool({
 	port: parseInt(process.env.GRAFANA_DB_PORT || '5432', 10),
 });
 
+const maxRecordsToSaveAtATime = 5000;
+
+const saveRecords = (recordsToSave: IdempiereLog[]) => {
+	let variableCounter = 1;
+	let valuesStatement = recordsToSave
+		.map((record) => '(' + record.map(() => '$' + variableCounter++).join(',') + ')')
+		.join(',');
+	console.log('saving ' + recordsToSave.length + ' records');
+	return grafana.query(
+		`insert into ${process.env
+			.GRAFANA_TABLE!} (log_time, query_type, query_name, duration, variables, ad_client_id, ad_org_id, record_uu) VALUES` +
+			valuesStatement +
+			' ON CONFLICT DO NOTHING',
+		recordsToSave.flatMap((record) => record),
+	);
+};
+
 // Ensure the process doesn't terminate by checking for and sending batch updates
 let psqlInsertsToSend: IdempiereLog[] = [];
+let areProcessingExistingFiles = false;
 setInterval(() => {
 	// If we're currently saving or there's nothing to send, be done
-	if (isAQueryInProcess || !psqlInsertsToSend.length) {
+	if (isAQueryInProcess || !psqlInsertsToSend.length || areProcessingExistingFiles) {
 		return;
 	}
 	isAQueryInProcess = true;
 	// Don't send more than 5000 at a time
-	let psqlInsertsBeingSent = [...psqlInsertsToSend.slice(0, 5000)];
+	let psqlInsertsBeingSent = [...psqlInsertsToSend.slice(0, maxRecordsToSaveAtATime)];
 	isAQueryInProcess = true;
-	let variableCounter = 1;
-	let valuesStatement = psqlInsertsBeingSent
-		.map((record) => '(' + record.map(() => '$' + variableCounter++).join(',') + ')')
-		.join(',');
-	console.log('saving ' + psqlInsertsBeingSent.length + ' records');
-	grafana
-		.query(
-			`insert into ${process.env
-				.GRAFANA_TABLE!} (log_time, query_type, query_name, duration, variables, ad_client_id, ad_org_id, record_uu) VALUES` +
-				valuesStatement +
-				' ON CONFLICT DO NOTHING',
-			psqlInsertsBeingSent.flatMap((record) => record),
-		)
+	saveRecords(psqlInsertsBeingSent)
 		.then(() => {
 			console.log('successfully saved records');
 			psqlInsertsToSend.splice(0, psqlInsertsBeingSent.length);
@@ -63,7 +69,7 @@ setInterval(() => {
 		.finally(() => {
 			isAQueryInProcess = false;
 		});
-}, 5000);
+}, 1000);
 
 const iDempiereFileNamePattern = /idempiere\.(\d{4})-(\d{2})-(\d{2})_\d+.log$/;
 let fileNames = readdirSync(process.env.IDEMPIERE_LOG_DIRECTORY).filter((fileName) =>
@@ -72,6 +78,7 @@ let fileNames = readdirSync(process.env.IDEMPIERE_LOG_DIRECTORY).filter((fileNam
 const lastFileName = fileNames[fileNames.length - 1];
 if (process.env.CONSIDER_EXISTING === 'true') {
 	console.log('parsing existing files...');
+	areProcessingExistingFiles = true;
 	let fileCounter = 1;
 	for (let fileName of fileNames) {
 		if (fileName === lastFileName) {
@@ -90,8 +97,19 @@ if (process.env.CONSIDER_EXISTING === 'true') {
 			// Now prepare the data for saving to the DB
 			let processedLine: IdempiereLog | undefined;
 			(processedLine = processLogLine({ year, month, day }, line)) && psqlInsertsToSend.push(processedLine);
+			if (psqlInsertsToSend.length >= maxRecordsToSaveAtATime) {
+				await saveRecords(psqlInsertsToSend)
+					.then(() => {
+						console.log('successfully saved records');
+						psqlInsertsToSend.length = 0;
+					})
+					.catch((error) => {
+						console.log('error saving records: ' + error);
+					});
+			}
 		}
 	}
+	areProcessingExistingFiles = false;
 } else {
 	console.log('skipping existing files...');
 }
