@@ -98,6 +98,7 @@ if (process.env.CONSIDER_EXISTING === 'true') {
 			let processedLine: IdempiereLog | undefined;
 			(processedLine = processLogLine({ year, month, day }, line)) && psqlInsertsToSend.push(processedLine);
 			if (psqlInsertsToSend.length >= maxRecordsToSaveAtATime) {
+				console.log('saving existing file records...')
 				await saveRecords(psqlInsertsToSend)
 					.then(() => {
 						console.log('successfully saved records');
