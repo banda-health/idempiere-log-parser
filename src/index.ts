@@ -33,16 +33,36 @@ const maxRecordsToSaveAtATime = 5000;
 
 const saveRecords = (recordsToSave: IdempiereLog[]) => {
 	let variableCounter = 1;
+	const fieldsToSave = [
+		'log_time',
+		'query_type',
+		'query_name',
+		'duration',
+		'variables',
+		'ad_client_id',
+		'ad_org_id',
+		'record_uu',
+		'ad_user_id',
+	];
 	let valuesStatement = recordsToSave
-		.map((record) => '(' + record.map(() => '$' + variableCounter++).join(',') + ')')
+		.map(() => '(' + fieldsToSave.map(() => '$' + variableCounter++).join(',') + ')')
 		.join(',');
 	console.log('saving ' + recordsToSave.length + ' records');
 	return grafana.query(
-		`insert into ${process.env
-			.GRAFANA_TABLE!} (log_time, query_type, query_name, duration, variables, ad_client_id, ad_org_id, record_uu) VALUES` +
+		`insert into ${process.env.GRAFANA_TABLE!} (${fieldsToSave.join(',')}) VALUES` +
 			valuesStatement +
 			' ON CONFLICT DO NOTHING',
-		recordsToSave.flatMap((record) => record),
+		recordsToSave.flatMap((record) => [
+			record.logTime,
+			record.queryType,
+			record.transactionName,
+			record.duration || 0,
+			record.variables,
+			record.clientId,
+			record.organizationId,
+			record.recordUU,
+			record.userId,
+		]),
 	);
 };
 

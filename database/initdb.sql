@@ -10,6 +10,7 @@ CREATE UNLOGGED TABLE idempiere_log
 	ad_client_id numeric,
 	ad_org_id    numeric,
 	record_uu    uuid,
+	ad_user_id   numeric,
 	CONSTRAINT idempiere_log_pk PRIMARY KEY (log_time, query_type, query_name)
 );
 
