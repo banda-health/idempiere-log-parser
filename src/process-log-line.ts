@@ -100,8 +100,9 @@ export const processLogLine = (
 	if (variables) {
 		try {
 			// Try casting it to a valid JSON object
-			variables = JSON.stringify({ variables: JSON.parse('{' + variables + '}') });
-			recordUU = variables?.UU;
+			let parsedVariables = JSON.parse(variables);
+			recordUU = parsedVariables?.UU;
+			variables = JSON.stringify(parsedVariables);
 		} catch {
 			// The cast failed, so just save it as a string
 			variables = JSON.stringify({ variables });
