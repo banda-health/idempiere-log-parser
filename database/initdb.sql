@@ -14,4 +14,4 @@ CREATE UNLOGGED TABLE idempiere_log
 	CONSTRAINT idempiere_log_pk PRIMARY KEY (log_time, query_type, query_name)
 );
 
-CREATE INDEX idempiere_log_time ON idempiere_log (log_time);
+CREATE INDEX idempiere_log_time ON idempiere_log USING brin (log_time);
