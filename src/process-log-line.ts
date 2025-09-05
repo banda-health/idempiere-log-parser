@@ -3,6 +3,7 @@ function convertToSqlTimestamp(date: number) {
 }
 
 export type IdempiereLog = {
+	errorData?: string;
 	logTime: string;
 	queryType: 'query' | 'mutation' | 'log';
 	transactionName: string;
@@ -20,15 +21,26 @@ const logNamePattern = /LoggingMutation\.Log: /;
 const executionDurationPattern = /execution time \(ms\): (\d*) /;
 const variablesPattern = /variables: (.*), execution/s;
 const logPattern = /\.Log: (.*), AD_Client_ID: (\d+), AD_Org_ID: (\d+), AD_User_ID: (\d+)/s;
+const exceptionPattern = /SimpleDataFetcherExceptionHandler.onException: (.*)/;
+const logLineStartPattern = /^\d{2}:\d{2}:\d{2}.\d{3}/;
 // some logs extend over multiple lines, so we'll want to capture those
 let multiLineData = { logTime: new Date(), line: '', isPresent: false, queryType: '', transactionName: '' };
+let exceptionData: string[] = [];
 export const processLogLine = (
 	{ year, month, day }: { year: string; month: string; day: string },
 	line: string,
 ): IdempiereLog | undefined => {
-	if (!graphqlNamePattern.test(line) && !multiLineData.isPresent && !logNamePattern.test(line)) {
+	// If we're not doing anything with this line, be done
+	if (
+		!graphqlNamePattern.test(line) &&
+		!multiLineData.isPresent &&
+		!logNamePattern.test(line) &&
+		!exceptionPattern.test(line) &&
+		!exceptionData.length
+	) {
 		return;
 	}
+	// If this is a log, capture the data
 	if (logNamePattern.test(line)) {
 		const logTime = new Date(
 			parseInt(year, 10),
@@ -50,6 +62,14 @@ export const processLogLine = (
 			variables: loggedData,
 		};
 	}
+	// If this is the start of an error or not a line starting with a date, capturing the data and return
+	if (exceptionPattern.test(line) || (exceptionData.length && !logLineStartPattern.test(line))) {
+		exceptionData.push(
+			exceptionPattern.test(line) ? line.split('SimpleDataFetcherExceptionHandler.onException: ')[1] : line,
+		);
+		return;
+	}
+	// By now, we have the GraphQL data
 	// If we got here and there's multi-line data present, let's assume a weird error and reset
 	if (graphqlNamePattern.test(line)) {
 		multiLineData.isPresent = false;
@@ -111,8 +131,11 @@ export const processLogLine = (
 	}
 
 	// Now prepare the data for saving to the DB
+	const errorDataToReturn = exceptionData.length ? [...exceptionData].join('\n') : undefined;
+	exceptionData.length = 0;
 	return {
 		duration,
+		errorData: errorDataToReturn,
 		logTime: convertToSqlTimestamp(logTime.getTime()),
 		transactionName,
 		queryType: queryType === 'mutation' ? 'mutation' : 'query',

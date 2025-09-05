@@ -43,6 +43,7 @@ const saveRecords = (recordsToSave: IdempiereLog[]) => {
 		'ad_org_id',
 		'record_uu',
 		'ad_user_id',
+		'error_data',
 	];
 	let valuesStatement = recordsToSave
 		.map(() => '(' + fieldsToSave.map(() => '$' + variableCounter++).join(',') + ')')
@@ -61,7 +62,8 @@ const saveRecords = (recordsToSave: IdempiereLog[]) => {
 			record.clientId,
 			record.organizationId,
 			record.recordUU,
-			record.userId,
+			record.userId,	
+			record.errorData || null,
 		]),
 	);
 };
