@@ -3,23 +3,26 @@ function convertToSqlTimestamp(date: number) {
 }
 
 export type IdempiereLog = {
+	clientId?: number;
+	duration?: number;
 	errorData?: string;
 	logTime: string;
-	queryType: 'query' | 'mutation' | 'log';
-	transactionName: string;
-	duration?: number;
-	variables?: any;
-	clientId?: number;
 	organizationId?: number;
-	userId?: number;
+	queryType: 'query' | 'mutation' | 'log';
 	recordUU?: string;
+	transactionName: string;
+	variables?: any;
+	userContext?: string;
+	userId?: number;
 };
 
 const uuPattern = /UU: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 const graphqlNamePattern = /LoggingInstrumentation\.onCompleted: (\w*) (\w*)\(/;
 const logNamePattern = /LoggingMutation\.Log: /;
 const executionDurationPattern = /execution time \(ms\): (\d*) /;
-const variablesPattern = /variables: (.*), execution/s;
+const variablesPattern =
+	/variables: (.*), userId: (\d+), clientId: (\d+), organizationId: (\d+), roleId: (\d+), warehouseId: (\d+), execution/s;
+const variablesPatternWithoutUserContext = /variables: (.*), execution/s;
 const logPattern = /\.Log: (.*), AD_Client_ID: (\d+), AD_Org_ID: (\d+), AD_User_ID: (\d+)/s;
 const exceptionPattern = /SimpleDataFetcherExceptionHandler.onException: (.*)/;
 const logLineStartPattern = /^\d{2}:\d{2}:\d{2}.\d{3}/;
@@ -112,11 +115,22 @@ export const processLogLine = (
 		multiLineData.line = '';
 	}
 	const duration = parseInt(executionDurationPattern.exec(lineToUse)?.[1] || '0', 10);
-	let variables: any | undefined =
-		variablesPattern.test(lineToUse) && variablesPattern.exec(lineToUse)![1]
-			? variablesPattern.exec(lineToUse)![1]
-			: undefined;
+	let [, variables, userId, clientId, organizationId, roleId, warehouseId] = variablesPattern.test(lineToUse)
+		? variablesPattern.exec(lineToUse)!
+		: variablesPatternWithoutUserContext.test(lineToUse)
+		? variablesPatternWithoutUserContext.exec(lineToUse)!
+		: [];
 	let recordUU: string | undefined;
+	let userContext: string | undefined;
+	if (userId || clientId || organizationId || roleId || warehouseId) {
+		userContext = JSON.stringify({
+			clientId: clientId ? parseInt(clientId, 10) : undefined,
+			organizationId: organizationId ? parseInt(organizationId, 10) : undefined,
+			roleId: roleId ? parseInt(roleId, 10) : undefined,
+			userId: userId ? parseInt(userId, 10) : undefined,
+			warehouseId: warehouseId ? parseInt(warehouseId, 10) : undefined,
+		});
+	}
 	if (variables) {
 		try {
 			// Try casting it to a valid JSON object
@@ -133,6 +147,7 @@ export const processLogLine = (
 	// Now prepare the data for saving to the DB
 	const errorDataToReturn = exceptionData.length ? [...exceptionData].join('\n') : undefined;
 	exceptionData.length = 0;
+	// If nothing was set for the user's context information, all these should be 0 and we don't want to log that here (logged on the variables)
 	return {
 		duration,
 		errorData: errorDataToReturn,
@@ -140,6 +155,7 @@ export const processLogLine = (
 		transactionName,
 		queryType: queryType === 'mutation' ? 'mutation' : 'query',
 		recordUU: recordUU || undefined,
+		userContext: userContext || undefined,
 		variables: variables || undefined,
 	};
 };
