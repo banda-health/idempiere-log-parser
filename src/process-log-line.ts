@@ -3,17 +3,14 @@ function convertToSqlTimestamp(date: number) {
 }
 
 export type IdempiereLog = {
-	clientId?: number;
 	duration?: number;
 	errorData?: string;
 	logTime: string;
-	organizationId?: number;
 	queryType: 'query' | 'mutation' | 'log';
 	recordUU?: string;
 	transactionName: string;
 	variables?: any;
 	userContext?: string;
-	userId?: number;
 };
 
 const uuPattern = /UU: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
@@ -23,7 +20,9 @@ const executionDurationPattern = /execution time \(ms\): (\d*) /;
 const variablesPattern =
 	/variables: (.*), userId: (\d+), clientId: (\d+), organizationId: (\d+), roleId: (\d+), warehouseId: (\d+), execution/s;
 const variablesPatternWithoutUserContext = /variables: (.*), execution/s;
-const logPattern = /\.Log: (.*), AD_Client_ID: (\d+), AD_Org_ID: (\d+), AD_User_ID: (\d+)/s;
+const logPatternWithLessContext = /\.Log: (.*), AD_Client_ID: (\d+), AD_Org_ID: (\d+), AD_User_ID: (\d+)/s;
+const logPatternWithMoreContext =
+	/\.Log: (.*), userId: (\d+), clientId: (\d+), organizationId: (\d+), roleId: (\d+), warehouseId: (\d+)/s;
 const exceptionPattern = /SimpleDataFetcherExceptionHandler.onException: (.*)/;
 const logLineStartPattern = /^\d{2}:\d{2}:\d{2}.\d{3}/;
 // some logs extend over multiple lines, so we'll want to capture those
@@ -54,14 +53,30 @@ export const processLogLine = (
 			parseInt(line.substring(6, 8), 10),
 			parseInt(line.substring(9, 12), 10),
 		);
-		const [, loggedData, clientId, organizationId, userId] = logPattern.exec(line) || [, '', '0', '0', '0'];
+		let loggedData: string | undefined;
+		let clientId: string | undefined;
+		let organizationId: string | undefined;
+		let roleId: string | undefined;
+		let warehouseId: string | undefined;
+		let userId: string | undefined;
+		if (logPatternWithLessContext.test(line)) {
+			[, loggedData, clientId, organizationId, userId] = logPatternWithLessContext.exec(line) || [, ''];
+		} else if (logPatternWithMoreContext.test(line)) {
+			[, loggedData, userId, clientId, organizationId, roleId, warehouseId] = logPatternWithMoreContext.exec(line) || [
+				'',
+			];
+		}
 		return {
-			clientId: clientId ? parseInt(clientId, 10) : undefined,
 			logTime: convertToSqlTimestamp(logTime.getTime()),
-			organizationId: organizationId ? parseInt(organizationId, 10) : undefined,
 			queryType: 'log',
 			transactionName: 'Log',
-			userId: userId ? parseInt(userId, 10) : undefined,
+			userContext: JSON.stringify({
+				clientId: clientId ? parseInt(clientId, 10) : undefined,
+				organizationId: organizationId ? parseInt(organizationId, 10) : undefined,
+				roleId: roleId ? parseInt(roleId, 10) : undefined,
+				userId: userId ? parseInt(userId, 10) : undefined,
+				warehouseId: warehouseId ? parseInt(warehouseId, 10) : undefined,
+			}),
 			variables: loggedData,
 		};
 	}

@@ -83,9 +83,20 @@ describe('processLogLine', () => {
 			expect(result).toBeDefined();
 			expect(result?.queryType).toBe('log');
 			expect(result?.transactionName).toBe('Log');
-			expect(result?.clientId).toBe(100);
-			expect(result?.organizationId).toBe(0);
-			expect(result?.userId).toBe(1);
+			expect(result?.userContext).toBe('{"clientId":100,"organizationId":0,"userId":1}');
+			expect(result?.variables).toBe('User action performed');
+		});
+
+		it('should process a log line with more context (userId, clientId, organizationId, roleId, warehouseId)', () => {
+			const line =
+				'10:30:45.123 INFO  [http-nio-8080-exec-1] LoggingMutation.Log: User action performed, userId: 42, clientId: 100, organizationId: 0, roleId: 5, warehouseId: 10';
+
+			const result = processLogLine(testDate, line);
+
+			expect(result).toBeDefined();
+			expect(result?.queryType).toBe('log');
+			expect(result?.transactionName).toBe('Log');
+			expect(result?.userContext).toBe('{"clientId":100,"organizationId":0,"roleId":5,"userId":42,"warehouseId":10}');
 			expect(result?.variables).toBe('User action performed');
 		});
 	});
@@ -769,9 +780,7 @@ describe('processLogLine', () => {
 				expect(result).toBeDefined();
 				expect(result?.queryType).toBe('log');
 				expect(result?.transactionName).toBe('Log');
-				expect(result?.clientId).toBe(100);
-				expect(result?.organizationId).toBe(0);
-				expect(result?.userId).toBe(42);
+				expect(result?.userContext).toBe('{"clientId":100,"organizationId":0,"userId":42}');
 				expect(result?.variables).toBe('User performed action: UPDATE_PREFERENCES');
 			});
 
