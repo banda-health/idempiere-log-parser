@@ -99,6 +99,21 @@ describe('processLogLine', () => {
 			expect(result?.userContext).toBe('{"clientId":100,"organizationId":0,"roleId":5,"userId":42,"warehouseId":10}');
 			expect(result?.variables).toBe('User action performed');
 		});
+
+		it('should capture sessionId when present in a log line', () => {
+			const line =
+				'10:30:45.123 INFO  [http-nio-8080-exec-1] LoggingMutation.Log: User action performed, userId: 42, clientId: 100, organizationId: 0, roleId: 5, warehouseId: 10, sessionId: 12345';
+
+			const result = processLogLine(testDate, line);
+
+			expect(result).toBeDefined();
+			expect(result?.queryType).toBe('log');
+			expect(result?.transactionName).toBe('Log');
+			expect(result?.userContext).toBe(
+				'{"clientId":100,"organizationId":0,"roleId":5,"sessionId":12345,"userId":42,"warehouseId":10}',
+			);
+			expect(result?.variables).toBe('User action performed');
+		});
 	});
 
 	describe('Exception processing', () => {
@@ -167,6 +182,22 @@ describe('processLogLine', () => {
 			expect(result?.duration).toBe(45);
 			expect(result?.variables).toBe('{"id":"123"}');
 			expect(result?.userContext).toBe('{"clientId":100,"organizationId":0,"roleId":5,"userId":42,"warehouseId":10}');
+		});
+
+		it('should capture sessionId when present in a GraphQL query line', () => {
+			const line =
+				'10:30:45.123 INFO  [http-nio-8080-exec-1] LoggingInstrumentation.onCompleted: query GetUserWithContext( variables: {"id": "123"}, userId: 42, clientId: 100, organizationId: 0, roleId: 5, warehouseId: 10, sessionId: 98765, execution time (ms): 45 ';
+
+			const result = processLogLine(testDate, line);
+
+			expect(result).toBeDefined();
+			expect(result?.queryType).toBe('query');
+			expect(result?.transactionName).toBe('GetUserWithContext');
+			expect(result?.duration).toBe(45);
+			expect(result?.variables).toBe('{"id":"123"}');
+			expect(result?.userContext).toBe(
+				'{"clientId":100,"organizationId":0,"roleId":5,"sessionId":98765,"userId":42,"warehouseId":10}',
+			);
 		});
 	});
 

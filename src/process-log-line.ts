@@ -19,10 +19,14 @@ const logNamePattern = /LoggingMutation\.Log: /;
 const executionDurationPattern = /execution time \(ms\): (\d*) /;
 const variablesPattern =
 	/variables: (.*), userId: (\d+), clientId: (\d+), organizationId: (\d+), roleId: (\d+), warehouseId: (\d+), execution/s;
+const variablesPatternWithSessionId =
+	/variables: (.*), userId: (\d+), clientId: (\d+), organizationId: (\d+), roleId: (\d+), warehouseId: (\d+), sessionId: (\d+), execution/s;
 const variablesPatternWithoutUserContext = /variables: (.*), execution/s;
 const logPatternWithLessContext = /\.Log: (.*), AD_Client_ID: (\d+), AD_Org_ID: (\d+), AD_User_ID: (\d+)/s;
 const logPatternWithMoreContext =
 	/\.Log: (.*), userId: (\d+), clientId: (\d+), organizationId: (\d+), roleId: (\d+), warehouseId: (\d+)/s;
+const logPatternWithMoreContextWithSessionId =
+	/\.Log: (.*), userId: (\d+), clientId: (\d+), organizationId: (\d+), roleId: (\d+), warehouseId: (\d+), sessionId: (\d+)/s;
 const exceptionPattern = /SimpleDataFetcherExceptionHandler.onException: (.*)/;
 const logLineStartPattern = /^\d{2}:\d{2}:\d{2}.\d{3}/;
 // some logs extend over multiple lines, so we'll want to capture those
@@ -59,8 +63,13 @@ export const processLogLine = (
 		let roleId: string | undefined;
 		let warehouseId: string | undefined;
 		let userId: string | undefined;
+		let sessionId: string | undefined;
 		if (logPatternWithLessContext.test(line)) {
 			[, loggedData, clientId, organizationId, userId] = logPatternWithLessContext.exec(line) || [, ''];
+		} else if (logPatternWithMoreContextWithSessionId.test(line)) {
+			[, loggedData, userId, clientId, organizationId, roleId, warehouseId, sessionId] = logPatternWithMoreContextWithSessionId.exec(line) || [
+				'',
+			];
 		} else if (logPatternWithMoreContext.test(line)) {
 			[, loggedData, userId, clientId, organizationId, roleId, warehouseId] = logPatternWithMoreContext.exec(line) || [
 				'',
@@ -74,6 +83,7 @@ export const processLogLine = (
 				clientId: clientId ? parseInt(clientId, 10) : undefined,
 				organizationId: organizationId ? parseInt(organizationId, 10) : undefined,
 				roleId: roleId ? parseInt(roleId, 10) : undefined,
+				sessionId: sessionId ? parseInt(sessionId, 10) : undefined,
 				userId: userId ? parseInt(userId, 10) : undefined,
 				warehouseId: warehouseId ? parseInt(warehouseId, 10) : undefined,
 			}),
@@ -130,18 +140,21 @@ export const processLogLine = (
 		multiLineData.line = '';
 	}
 	const duration = parseInt(executionDurationPattern.exec(lineToUse)?.[1] || '0', 10);
-	let [, variables, userId, clientId, organizationId, roleId, warehouseId] = variablesPattern.test(lineToUse)
+	let [, variables, userId, clientId, organizationId, roleId, warehouseId, sessionId] = variablesPatternWithSessionId.test(lineToUse)
+		? variablesPatternWithSessionId.exec(lineToUse)!
+		: variablesPattern.test(lineToUse)
 		? variablesPattern.exec(lineToUse)!
 		: variablesPatternWithoutUserContext.test(lineToUse)
 		? variablesPatternWithoutUserContext.exec(lineToUse)!
 		: [];
 	let recordUU: string | undefined;
 	let userContext: string | undefined;
-	if (userId || clientId || organizationId || roleId || warehouseId) {
+	if (userId || clientId || organizationId || roleId || warehouseId || sessionId) {
 		userContext = JSON.stringify({
 			clientId: clientId ? parseInt(clientId, 10) : undefined,
 			organizationId: organizationId ? parseInt(organizationId, 10) : undefined,
 			roleId: roleId ? parseInt(roleId, 10) : undefined,
+			sessionId: sessionId ? parseInt(sessionId, 10) : undefined,
 			userId: userId ? parseInt(userId, 10) : undefined,
 			warehouseId: warehouseId ? parseInt(warehouseId, 10) : undefined,
 		});
