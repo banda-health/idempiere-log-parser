@@ -28,6 +28,12 @@ const grafana = new pg.Pool({
 	password: process.env.GRAFANA_PASSWORD,
 	port: parseInt(process.env.GRAFANA_DB_PORT || '5432', 10),
 });
+grafana.on('connect', (client) => {
+	client
+		.query('SET synchronous_commit TO OFF')
+		.then(() => console.log('synchronous_commit is OFF for this DB session'))
+		.catch((error) => console.log('failed to set synchronous_commit to OFF: ' + error));
+});
 
 const maxRecordsToSaveAtATime = 5000;
 

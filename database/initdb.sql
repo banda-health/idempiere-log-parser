@@ -1,6 +1,6 @@
 \c grafana;
 
-CREATE UNLOGGED TABLE idempiere_log
+CREATE TABLE idempiere_log
 (
 	log_time     timestamp NOT NULL,
 	query_type   varchar   NOT NULL,
