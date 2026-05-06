@@ -39,6 +39,20 @@ describe('processLogLine', () => {
 			expect(result?.userContext).toBeUndefined();
 		});
 
+		it('should process a GraphQL mutation line with selection set format', () => {
+			const line =
+				'10:55:02.838 LoggingInstrumentation.onCompleted: mutation Logout {  Logout}, execution time (ms): 16 [64081]';
+
+			const result = processLogLine(testDate, line);
+
+			expect(result).toBeDefined();
+			expect(result?.queryType).toBe('mutation');
+			expect(result?.transactionName).toBe('Logout');
+			expect(result?.duration).toBe(16);
+			expect(result?.variables).toBeUndefined();
+			expect(result?.userContext).toBeUndefined();
+		});
+
 		it('should extract UU from variables when present', () => {
 			const line =
 				'10:30:45.123 INFO  [http-nio-8080-exec-1] LoggingInstrumentation.onCompleted: query GetRecord( variables: {"UU": "12345678-1234-1234-1234-123456789abc"}, execution time (ms): 30 ';

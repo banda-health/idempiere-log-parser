@@ -14,7 +14,7 @@ export type IdempiereLog = {
 };
 
 const uuPattern = /UU: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
-const graphqlNamePattern = /LoggingInstrumentation\.onCompleted: (\w*) (\w*)\(/;
+const graphqlNamePattern = /LoggingInstrumentation\.onCompleted: (\w*) (\w*)(?:\(|\s*\{)/;
 const logNamePattern = /LoggingMutation\.Log: /;
 const executionDurationPattern = /execution time \(ms\): (\d*) /;
 const variablesPattern =
