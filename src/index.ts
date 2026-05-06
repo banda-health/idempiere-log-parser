@@ -50,7 +50,7 @@ setInterval(() => {
 	// Don't send more than 5000 at a time
 	let psqlInsertsBeingSent = [...psqlInsertsToSend.slice(0, maxRecordsToSaveAtATime)];
 	isAQueryInProcess = true;
-	
+
 	console.log('saving ' + psqlInsertsBeingSent.length + ' records');
 	saveRecords(grafana, psqlInsertsBeingSent)
 		.then(() => {
@@ -70,18 +70,50 @@ let fileNames = readdirSync(process.env.IDEMPIERE_LOG_DIRECTORY).filter((fileNam
 	iDempiereFileNamePattern.test(fileName),
 );
 const lastFileName = fileNames[fileNames.length - 1];
+const shouldConsiderArchivedFiles =
+	process.env.CONSIDER_ARCHIVED === 'true' && !!process.env.IDEMPIERE_LOG_ARCHIVE_DIRECTORY;
+
+type LogFileLocation = {
+	directory: string;
+	fileName: string;
+};
+
+const getArchivedFiles = (): LogFileLocation[] => {
+	if (!shouldConsiderArchivedFiles) {
+		return [];
+	}
+
+	try {
+		return readdirSync(process.env.IDEMPIERE_LOG_ARCHIVE_DIRECTORY!)
+			.filter((fileName) => iDempiereFileNamePattern.test(fileName))
+			.map((fileName) => ({
+				directory: process.env.IDEMPIERE_LOG_ARCHIVE_DIRECTORY!,
+				fileName,
+			}));
+	} catch (error) {
+		console.log('unable to read archive directory: ' + error);
+		return [];
+	}
+};
+
 if (process.env.CONSIDER_EXISTING === 'true') {
 	console.log('parsing existing files...');
+	const filesToParse: LogFileLocation[] = [
+		...getArchivedFiles(),
+		...fileNames
+			.filter((fileName) => fileName !== lastFileName)
+			.map((fileName) => ({
+				directory: process.env.IDEMPIERE_LOG_DIRECTORY!,
+				fileName,
+			})),
+	];
 	areProcessingExistingFiles = true;
 	let fileCounter = 1;
-	for (let fileName of fileNames) {
-		if (fileName === lastFileName) {
-			continue;
-		}
-		console.log('parsing file ' + fileCounter++ + ' of ' + (fileNames.length - 1) + ': ' + fileName);
+	for (const { directory, fileName } of filesToParse) {
+		console.log('parsing file ' + fileCounter++ + ' of ' + filesToParse.length + ': ' + fileName);
 		// Pull day information from the file name
 		const [, year, month, day] = fileName.match(iDempiereFileNamePattern) || [];
-		const fileStream = createReadStream(join(process.env.IDEMPIERE_LOG_DIRECTORY!, fileName));
+		const fileStream = createReadStream(join(directory, fileName));
 
 		const readLineInterface = createInterface({
 			input: fileStream,
