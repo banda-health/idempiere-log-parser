@@ -4,6 +4,11 @@ import { IdempiereLog } from './process-log-line';
 const queryNameTable = process.env.GRAFANA_QUERY_NAME_TABLE || 'idempiere_log_query_name';
 
 export const saveRecords = (grafana: pg.Pool, recordsToSave: IdempiereLog[]) => {
+	const recordsWithValidQueryNames = recordsToSave.filter((record) => record.transactionName?.trim());
+	if (!recordsWithValidQueryNames.length) {
+		return Promise.resolve([]);
+	}
+
 	let variableCounter = 1;
 	const fieldsToSave = [
 		'log_time',
@@ -16,18 +21,16 @@ export const saveRecords = (grafana: pg.Pool, recordsToSave: IdempiereLog[]) => 
 		'user_context',
 	];
 
-	const valuesStatement = recordsToSave
+	const valuesStatement = recordsWithValidQueryNames
 		.map(() => '(' + fieldsToSave.map(() => '$' + variableCounter++).join(',') + ')')
 		.join(',');
 
-	const queryNames = [...new Set(recordsToSave.map((record) => record.transactionName))];
+	const queryNames = [...new Set(recordsWithValidQueryNames.map((record) => record.transactionName.trim()))];
 	let queryNameCounter = 1;
 	const queryNameValuesStatement = queryNames.map(() => `($${queryNameCounter++})`).join(',');
 	const saveQueryNamesPromise = queryNames.length
 		? grafana.query(
-				`insert into ${queryNameTable} (name) VALUES` +
-					queryNameValuesStatement +
-					' ON CONFLICT DO NOTHING',
+				`insert into ${queryNameTable} (name) VALUES` + queryNameValuesStatement + ' ON CONFLICT DO NOTHING',
 				queryNames,
 			)
 		: Promise.resolve();
@@ -38,10 +41,10 @@ export const saveRecords = (grafana: pg.Pool, recordsToSave: IdempiereLog[]) => 
 			`insert into ${process.env.GRAFANA_TABLE!} (${fieldsToSave.join(',')}) VALUES` +
 				valuesStatement +
 				' ON CONFLICT DO NOTHING',
-			recordsToSave.flatMap((record) => [
+			recordsWithValidQueryNames.flatMap((record) => [
 				record.logTime,
 				record.queryType,
-				record.transactionName,
+				record.transactionName.trim(),
 				record.duration || 0,
 				record.variables,
 				record.recordUU,
