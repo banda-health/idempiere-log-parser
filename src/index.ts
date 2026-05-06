@@ -6,6 +6,7 @@ import pg from 'pg';
 import { createInterface } from 'readline';
 import { Tail, TailOptions } from 'tail';
 import { IdempiereLog, processLogLine } from './process-log-line';
+import { saveRecords } from './save-records';
 
 // Load environment variables from any .env file that exists
 config();
@@ -37,39 +38,6 @@ grafana.on('connect', (client) => {
 
 const maxRecordsToSaveAtATime = 5000;
 
-const saveRecords = (recordsToSave: IdempiereLog[]) => {
-	let variableCounter = 1;
-	const fieldsToSave = [
-		'log_time',
-		'query_type',
-		'query_name',
-		'duration',
-		'variables',
-		'record_uu',
-		'error_data',
-		'user_context',
-	];
-	let valuesStatement = recordsToSave
-		.map(() => '(' + fieldsToSave.map(() => '$' + variableCounter++).join(',') + ')')
-		.join(',');
-	console.log('saving ' + recordsToSave.length + ' records');
-	return grafana.query(
-		`insert into ${process.env.GRAFANA_TABLE!} (${fieldsToSave.join(',')}) VALUES` +
-			valuesStatement +
-			' ON CONFLICT DO NOTHING',
-		recordsToSave.flatMap((record) => [
-			record.logTime,
-			record.queryType,
-			record.transactionName,
-			record.duration || 0,
-			record.variables,
-			record.recordUU,
-			record.errorData || null,
-			record.userContext || null,
-		]),
-	);
-};
-
 // Ensure the process doesn't terminate by checking for and sending batch updates
 let psqlInsertsToSend: IdempiereLog[] = [];
 let areProcessingExistingFiles = false;
@@ -82,7 +50,9 @@ setInterval(() => {
 	// Don't send more than 5000 at a time
 	let psqlInsertsBeingSent = [...psqlInsertsToSend.slice(0, maxRecordsToSaveAtATime)];
 	isAQueryInProcess = true;
-	saveRecords(psqlInsertsBeingSent)
+	
+	console.log('saving ' + psqlInsertsBeingSent.length + ' records');
+	saveRecords(grafana, psqlInsertsBeingSent)
 		.then(() => {
 			console.log('successfully saved records');
 			psqlInsertsToSend.splice(0, psqlInsertsBeingSent.length);
@@ -123,7 +93,7 @@ if (process.env.CONSIDER_EXISTING === 'true') {
 			(processedLine = processLogLine({ year, month, day }, line)) && psqlInsertsToSend.push(processedLine);
 			if (psqlInsertsToSend.length >= maxRecordsToSaveAtATime) {
 				console.log('saving existing file records...');
-				await saveRecords(psqlInsertsToSend)
+				await saveRecords(grafana, psqlInsertsToSend)
 					.then(() => {
 						console.log('successfully saved records');
 						psqlInsertsToSend.length = 0;

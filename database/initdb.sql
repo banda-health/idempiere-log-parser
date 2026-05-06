@@ -17,3 +17,10 @@ CREATE TABLE idempiere_log
 );
 
 CREATE INDEX idempiere_log_time ON idempiere_log USING brin (log_time);
+
+CREATE TABLE idempiere_log_query_name
+(
+	name varchar NOT NULL,
+	CONSTRAINT idempiere_log_query_name_pk PRIMARY KEY (name)
+);
+
