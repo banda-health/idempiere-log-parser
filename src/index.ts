@@ -41,29 +41,6 @@ const maxRecordsToSaveAtATime = 5000;
 // Ensure the process doesn't terminate by checking for and sending batch updates
 let psqlInsertsToSend: IdempiereLog[] = [];
 let areProcessingExistingFiles = false;
-setInterval(() => {
-	// If we're currently saving or there's nothing to send, be done
-	if (isAQueryInProcess || !psqlInsertsToSend.length || areProcessingExistingFiles) {
-		return;
-	}
-	isAQueryInProcess = true;
-	// Don't send more than 5000 at a time
-	let psqlInsertsBeingSent = [...psqlInsertsToSend.slice(0, maxRecordsToSaveAtATime)];
-	isAQueryInProcess = true;
-
-	console.log('saving ' + psqlInsertsBeingSent.length + ' records');
-	saveRecords(grafana, psqlInsertsBeingSent)
-		.then(() => {
-			console.log('successfully saved records');
-			psqlInsertsToSend.splice(0, psqlInsertsBeingSent.length);
-		})
-		.catch((error) => {
-			console.log('error saving records: ' + error);
-		})
-		.finally(() => {
-			isAQueryInProcess = false;
-		});
-}, 1000);
 
 const iDempiereFileNamePattern = /idempiere\.(\d{4})-(\d{2})-(\d{2})_\d+.log$/;
 let fileNames = readdirSync(process.env.IDEMPIERE_LOG_DIRECTORY).filter((fileName) =>
@@ -140,6 +117,30 @@ if (process.env.CONSIDER_EXISTING === 'true') {
 } else {
 	console.log('skipping existing files...');
 }
+
+setInterval(() => {
+	// If we're currently saving or there's nothing to send, be done
+	if (isAQueryInProcess || !psqlInsertsToSend.length || areProcessingExistingFiles) {
+		return;
+	}
+	isAQueryInProcess = true;
+	// Don't send more than 5000 at a time
+	let psqlInsertsBeingSent = [...psqlInsertsToSend.slice(0, maxRecordsToSaveAtATime)];
+	isAQueryInProcess = true;
+
+	console.log('saving ' + psqlInsertsBeingSent.length + ' records');
+	saveRecords(grafana, psqlInsertsBeingSent)
+		.then(() => {
+			console.log('successfully saved records');
+			psqlInsertsToSend.splice(0, psqlInsertsBeingSent.length);
+		})
+		.catch((error) => {
+			console.log('error saving records: ' + error);
+		})
+		.finally(() => {
+			isAQueryInProcess = false;
+		});
+}, 1000);
 
 console.log('watching files...');
 
