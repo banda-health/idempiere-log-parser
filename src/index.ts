@@ -39,6 +39,13 @@ grafana.on('connect', (client) => {
 
 const maxRecordsToSaveAtATime = 5000;
 const variablesRetentionDays = parseInt(process.env.PII_VARIABLES_RETENTION_DAYS || '0', 10);
+if (variablesRetentionDays > 0) {
+	console.log(
+		`variables purge enabled: clearing GraphQL variables older than ${variablesRetentionDays} days after saves`,
+	);
+} else {
+	console.log('variables purge disabled: PII_VARIABLES_RETENTION_DAYS is not set or is 0');
+}
 const maybePurgeOldVariables =
 	variablesRetentionDays > 0 ? scheduleVariablesPurge(grafana, variablesRetentionDays) : () => {};
 
