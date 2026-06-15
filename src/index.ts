@@ -7,6 +7,7 @@ import { createInterface } from 'readline';
 import { Tail, TailOptions } from 'tail';
 import { IdempiereLog, processLogLine } from './process-log-line';
 import { saveRecords } from './save-records';
+import { scheduleVariablesPurge } from './schedule-variables-purge';
 
 // Load environment variables from any .env file that exists
 config();
@@ -37,6 +38,9 @@ grafana.on('connect', (client) => {
 });
 
 const maxRecordsToSaveAtATime = 5000;
+const variablesRetentionDays = parseInt(process.env.PII_VARIABLES_RETENTION_DAYS || '0', 10);
+const maybePurgeOldVariables =
+	variablesRetentionDays > 0 ? scheduleVariablesPurge(grafana, variablesRetentionDays) : () => {};
 
 // Ensure the process doesn't terminate by checking for and sending batch updates
 let psqlInsertsToSend: IdempiereLog[] = [];
@@ -106,6 +110,7 @@ if (process.env.CONSIDER_EXISTING === 'true') {
 					.then(() => {
 						console.log('successfully saved records');
 						psqlInsertsToSend.length = 0;
+						maybePurgeOldVariables();
 					})
 					.catch((error) => {
 						console.log('error saving records: ' + error);
@@ -133,6 +138,7 @@ setInterval(() => {
 		.then(() => {
 			console.log('successfully saved records');
 			psqlInsertsToSend.splice(0, psqlInsertsBeingSent.length);
+			maybePurgeOldVariables();
 		})
 		.catch((error) => {
 			console.log('error saving records: ' + error);
