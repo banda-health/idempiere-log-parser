@@ -22,9 +22,9 @@ export const scheduleVariablesPurge = (
 		purgeOldVariables(grafana, retentionDays)
 			.then((result) => {
 				const purgedRowCount = result.rowCount ?? 0;
-				if (purgedRowCount > 0) {
-					console.log(`purged variables from ${purgedRowCount} log records older than ${retentionDays} days`);
-				}
+				console.log(
+					`variables purge completed: cleared variables on ${purgedRowCount} log records older than ${retentionDays} days`,
+				);
 			})
 			.catch((error) => {
 				console.log('error purging old variables: ' + error);
