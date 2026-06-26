@@ -24,3 +24,27 @@ CREATE TABLE idempiere_log_query_name
 	CONSTRAINT idempiere_log_query_name_pk PRIMARY KEY (name)
 );
 
+CREATE TABLE idempiere_log_client
+(
+	client_id numeric NOT NULL,
+	CONSTRAINT idempiere_log_client_pk PRIMARY KEY (client_id)
+);
+
+CREATE TABLE idempiere_log_event_type
+(
+	name varchar NOT NULL,
+	CONSTRAINT idempiere_log_event_type_pk PRIMARY KEY (name)
+);
+
+CREATE TABLE idempiere_log_page
+(
+	pathname varchar NOT NULL,
+	CONSTRAINT idempiere_log_page_pk PRIMARY KEY (pathname)
+);
+
+CREATE TABLE idempiere_log_app_version
+(
+	version varchar NOT NULL,
+	CONSTRAINT idempiere_log_app_version_pk PRIMARY KEY (version)
+);
+

@@ -1,7 +1,26 @@
 import pg from 'pg';
+import { extractLogDimensions } from './extract-log-dimensions';
 import { IdempiereLog } from './process-log-line';
 
 const queryNameTable = process.env.GRAFANA_QUERY_NAME_TABLE || 'idempiere_log_query_name';
+const clientTable = 'idempiere_log_client';
+const eventTypeTable = 'idempiere_log_event_type';
+const pageTable = 'idempiere_log_page';
+const appVersionTable = 'idempiere_log_app_version';
+
+const insertDistinct = (grafana: pg.Pool, table: string, column: string, values: (string | number)[]) => {
+	if (!values.length) {
+		return Promise.resolve();
+	}
+
+	let variableCounter = 1;
+	const valuesStatement = values.map(() => `($${variableCounter++})`).join(',');
+
+	return grafana.query(
+		`insert into ${table} (${column}) VALUES${valuesStatement} ON CONFLICT DO NOTHING`,
+		values,
+	);
+};
 
 export const saveRecords = (grafana: pg.Pool, recordsToSave: IdempiereLog[]) => {
 	const recordsWithValidQueryNames = recordsToSave.filter((record) => record.transactionName?.trim());
@@ -26,17 +45,14 @@ export const saveRecords = (grafana: pg.Pool, recordsToSave: IdempiereLog[]) => 
 		.join(',');
 
 	const queryNames = [...new Set(recordsWithValidQueryNames.map((record) => record.transactionName.trim()))];
-	let queryNameCounter = 1;
-	const queryNameValuesStatement = queryNames.map(() => `($${queryNameCounter++})`).join(',');
-	const saveQueryNamesPromise = queryNames.length
-		? grafana.query(
-				`insert into ${queryNameTable} (name) VALUES` + queryNameValuesStatement + ' ON CONFLICT DO NOTHING',
-				queryNames,
-			)
-		: Promise.resolve();
+	const { appVersions, clientIds, eventTypes, pathnames } = extractLogDimensions(recordsWithValidQueryNames);
 
 	return Promise.all([
-		saveQueryNamesPromise,
+		insertDistinct(grafana, queryNameTable, 'name', queryNames),
+		insertDistinct(grafana, clientTable, 'client_id', clientIds),
+		insertDistinct(grafana, eventTypeTable, 'name', eventTypes),
+		insertDistinct(grafana, pageTable, 'pathname', pathnames),
+		insertDistinct(grafana, appVersionTable, 'version', appVersions),
 		grafana.query(
 			`insert into ${process.env.GRAFANA_TABLE!} (${fieldsToSave.join(',')}) VALUES` +
 				valuesStatement +
