@@ -5,6 +5,16 @@ import { join } from 'path';
 import pg from 'pg';
 import { createInterface } from 'readline';
 import { Tail, TailOptions } from 'tail';
+import {
+	filterReadableFiles,
+	iDempiereFileNamePattern,
+	isPermissionWatchError,
+	isReadablePath,
+	localDateKey,
+	LogFileLocation,
+	parseLogFileName,
+	selectStartupLogFiles,
+} from './log-files';
 import { IdempiereLog, processLogLine } from './process-log-line';
 import { saveRecords } from './save-records';
 import { scheduleVariablesPurge } from './schedule-variables-purge';
@@ -53,81 +63,81 @@ const maybePurgeOldVariables =
 let psqlInsertsToSend: IdempiereLog[] = [];
 let areProcessingExistingFiles = false;
 
-const iDempiereFileNamePattern = /idempiere\.(\d{4})-(\d{2})-(\d{2})_\d+.log$/;
-let fileNames = readdirSync(process.env.IDEMPIERE_LOG_DIRECTORY).filter((fileName) =>
-	iDempiereFileNamePattern.test(fileName),
-);
-const lastFileName = fileNames[fileNames.length - 1];
+const canReadLogFile = ({ directory, fileName }: LogFileLocation) => isReadablePath(join(directory, fileName));
+
+const listLogFilesInDirectory = (directory: string): LogFileLocation[] => {
+	try {
+		return filterReadableFiles(
+			readdirSync(directory)
+				.filter((fileName) => iDempiereFileNamePattern.test(fileName))
+				.map((fileName) => ({ directory, fileName })),
+			canReadLogFile,
+		);
+	} catch (error) {
+		console.log('unable to read log directory ' + directory + ': ' + error);
+		return [];
+	}
+};
+
+const liveFiles = listLogFilesInDirectory(process.env.IDEMPIERE_LOG_DIRECTORY);
 const shouldConsiderArchivedFiles =
 	process.env.CONSIDER_ARCHIVED === 'true' && !!process.env.IDEMPIERE_LOG_ARCHIVE_DIRECTORY;
+const archivedFiles = shouldConsiderArchivedFiles
+	? listLogFilesInDirectory(process.env.IDEMPIERE_LOG_ARCHIVE_DIRECTORY!)
+	: [];
+const considerExisting = process.env.CONSIDER_EXISTING === 'true';
+const { filesToParse, fileToWatch } = selectStartupLogFiles({
+	liveFiles,
+	archivedFiles,
+	considerExisting,
+	today: localDateKey(),
+});
 
-type LogFileLocation = {
-	directory: string;
-	fileName: string;
-};
-
-const getArchivedFiles = (): LogFileLocation[] => {
-	if (!shouldConsiderArchivedFiles) {
-		return [];
-	}
-
-	try {
-		return readdirSync(process.env.IDEMPIERE_LOG_ARCHIVE_DIRECTORY!)
-			.filter((fileName) => iDempiereFileNamePattern.test(fileName))
-			.map((fileName) => ({
-				directory: process.env.IDEMPIERE_LOG_ARCHIVE_DIRECTORY!,
-				fileName,
-			}));
-	} catch (error) {
-		console.log('unable to read archive directory: ' + error);
-		return [];
-	}
-};
-
-if (process.env.CONSIDER_EXISTING === 'true') {
-	console.log('parsing existing files...');
-	const filesToParse: LogFileLocation[] = [
-		...getArchivedFiles(),
-		...fileNames
-			.filter((fileName) => fileName !== lastFileName)
-			.map((fileName) => ({
-				directory: process.env.IDEMPIERE_LOG_DIRECTORY!,
-				fileName,
-			})),
-	];
+if (filesToParse.length) {
+	console.log(considerExisting ? 'parsing existing files...' : "parsing today's files...");
 	areProcessingExistingFiles = true;
 	let fileCounter = 1;
 	for (const { directory, fileName } of filesToParse) {
 		console.log('parsing file ' + fileCounter++ + ' of ' + filesToParse.length + ': ' + fileName);
-		// Pull day information from the file name
-		const [, year, month, day] = fileName.match(iDempiereFileNamePattern) || [];
-		const fileStream = createReadStream(join(directory, fileName));
+		const parsedFileName = parseLogFileName(fileName);
+		if (!parsedFileName) {
+			continue;
+		}
+		const { year, month, day } = parsedFileName;
+		try {
+			const fileStream = createReadStream(join(directory, fileName));
+			fileStream.on('error', (error) => {
+				console.log('error reading file ' + fileName + ': ' + error);
+			});
 
-		const readLineInterface = createInterface({
-			input: fileStream,
-			crlfDelay: Infinity,
-		});
-		for await (const line of readLineInterface) {
-			// Now prepare the data for saving to the DB
-			let processedLine: IdempiereLog | undefined;
-			(processedLine = processLogLine({ year, month, day }, line)) && psqlInsertsToSend.push(processedLine);
-			if (psqlInsertsToSend.length >= maxRecordsToSaveAtATime) {
-				console.log('saving existing file records...');
-				await saveRecords(grafana, psqlInsertsToSend)
-					.then(() => {
-						console.log('successfully saved records');
-						psqlInsertsToSend.length = 0;
-						maybePurgeOldVariables();
-					})
-					.catch((error) => {
-						console.log('error saving records: ' + error);
-					});
+			const readLineInterface = createInterface({
+				input: fileStream,
+				crlfDelay: Infinity,
+			});
+			for await (const line of readLineInterface) {
+				// Now prepare the data for saving to the DB
+				let processedLine: IdempiereLog | undefined;
+				(processedLine = processLogLine({ year, month, day }, line)) && psqlInsertsToSend.push(processedLine);
+				if (psqlInsertsToSend.length >= maxRecordsToSaveAtATime) {
+					console.log('saving existing file records...');
+					await saveRecords(grafana, psqlInsertsToSend)
+						.then(() => {
+							console.log('successfully saved records');
+							psqlInsertsToSend.length = 0;
+							maybePurgeOldVariables();
+						})
+						.catch((error) => {
+							console.log('error saving records: ' + error);
+						});
+				}
 			}
+		} catch (error) {
+			console.log('error parsing file ' + fileName + ': ' + error);
 		}
 	}
 	areProcessingExistingFiles = false;
-} else {
-	console.log('skipping existing files...');
+} else if (!considerExisting) {
+	console.log('skipping files from before today...');
 }
 
 setInterval(() => {
@@ -161,35 +171,56 @@ const watchedFiles: { [fileName: string]: Tail } = {};
 let isAQueryInProcess = false;
 const handleFileChange = (fileName: any, options?: TailOptions) => {
 	// If this was a rename, not an idempiere log file, or we're already watching it, be done
-	if (fileName === null || !iDempiereFileNamePattern.test(fileName) || watchedFiles[fileName]) {
+	if (!fileName || !iDempiereFileNamePattern.test(fileName) || watchedFiles[fileName]) {
 		return;
 	}
 
-	// Pull day information from the file name
-	const [, year, month, day] = fileName.match(iDempiereFileNamePattern) || [];
-	// Watch the new file
-	const tail = new Tail(join(process.env.IDEMPIERE_LOG_DIRECTORY!, fileName), options);
+	const parsedFileName = parseLogFileName(fileName);
+	if (!parsedFileName) {
+		return;
+	}
+	const filePath = join(process.env.IDEMPIERE_LOG_DIRECTORY!, fileName);
+	if (!isReadablePath(filePath)) {
+		console.log('skipping unreadable file: ' + fileName);
+		return;
+	}
 
-	tail.on('line', (line) => {
-		let processedLine: IdempiereLog | undefined;
-		(processedLine = processLogLine({ year, month, day }, line)) && psqlInsertsToSend.push(processedLine);
-	});
+	const { year, month, day } = parsedFileName;
+	try {
+		const tail = new Tail(filePath, options);
 
-	tail.on('error', (error) => {
-		console.log('ERROR: ' + error);
-	});
+		tail.on('line', (line) => {
+			let processedLine: IdempiereLog | undefined;
+			(processedLine = processLogLine({ year, month, day }, line)) && psqlInsertsToSend.push(processedLine);
+		});
 
-	// Finally, add this file to the watched files
-	watchedFiles[fileName] = tail;
+		tail.on('error', (error) => {
+			console.log('ERROR: ' + error);
+			try {
+				tail.unwatch();
+			} catch {
+				// Tail may already have stopped after a watch error
+			}
+			delete watchedFiles[fileName];
+		});
+
+		watchedFiles[fileName] = tail;
+	} catch (error) {
+		console.log('unable to watch file: ' + fileName + ' - ' + error);
+	}
 };
 
-handleFileChange(lastFileName, { fromBeginning: true });
+handleFileChange(fileToWatch?.fileName, { fromBeginning: true });
 
 watch(process.env.IDEMPIERE_LOG_DIRECTORY, {
 	ignored: (file, stats) => !!stats?.isFile() && !file.endsWith('.log'),
 	ignoreInitial: true,
+	ignorePermissionErrors: true,
 	cwd: process.env.IDEMPIERE_LOG_DIRECTORY,
 })
+	.on('error', (error) => {
+		console.log('watch error: ' + error);
+	})
 	.on('change', handleFileChange)
 	.on('add', (file) => {
 		console.log('new log file: ' + file, ' - removing watches on others...');
@@ -205,13 +236,32 @@ watch(process.env.IDEMPIERE_LOG_DIRECTORY, {
 		delete watchedFiles[file];
 	});
 
-// Clean up if the process needs to exit
-process.on('uncaughtException', (err, origin) => {
-	console.log(process.stderr.fd, `Caught exception: ${err}\n` + `Exception origin: ${origin}\n`);
-	grafana.end();
+const stopWatching = () => {
 	Object.keys(watchedFiles).forEach((watchedFile) => {
-		watchedFiles[watchedFile].unwatch();
+		try {
+			watchedFiles[watchedFile].unwatch();
+		} catch {
+			// Ignore cleanup failures from files we can no longer watch
+		}
 		delete watchedFiles[watchedFile];
 	});
+};
+
+process.on('unhandledRejection', (reason) => {
+	console.log('unhandledRejection: ' + reason);
+	if (isPermissionWatchError(reason)) {
+		return;
+	}
+});
+
+// Clean up if the process needs to exit
+process.on('uncaughtException', (err, origin) => {
+	if (isPermissionWatchError(err)) {
+		console.log('watch permission error (continuing): ' + err);
+		return;
+	}
+	console.log(process.stderr.fd, `Caught exception: ${err}\n` + `Exception origin: ${origin}\n`);
+	grafana.end();
+	stopWatching();
 	process.exit(1);
 });
