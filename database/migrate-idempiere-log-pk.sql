@@ -1,9 +1,9 @@
 -- Online surrogate-PK migration for an existing idempiere_log that still has
 -- PRIMARY KEY (log_time, query_type, query_name).
 --
--- That composite unique is what drops same-millisecond frontend Log rows
--- (they all share query_name = 'Log'). This migration replaces it with a
--- surrogate id PK and does not put a unique back on the old columns.
+-- Replaces the composite PRIMARY KEY with a surrogate id PK and keeps
+-- UNIQUE (log_time, query_type, query_name) as the dashboard / replay key.
+-- Same-ms frontend Log rows stay unique via extra microseconds on log_time.
 --
 -- Do NOT use `ALTER TABLE idempiere_log ADD COLUMN id BIGSERIAL`.
 -- BIGSERIAL is bigint NOT NULL DEFAULT nextval(...). A volatile default
@@ -18,7 +18,7 @@
 --   1. This file — nullable column + trigger (metadata, lock_timeout 1s)
 --   2. migrate-idempiere-log-pk-backfill.sql — batched UPDATE + VACUUM (online)
 --   3. migrate-idempiere-log-pk-step3.sql — NOT VALID / VALIDATE / CONCURRENTLY
---   4. migrate-idempiere-log-pk-step4.sql — drop composite PK, attach PK (id)
+--   4. migrate-idempiere-log-pk-step4.sql — attach PK (id) + UNIQUE natural key
 --
 -- CREATE INDEX CONCURRENTLY and VACUUM cannot run inside a transaction.
 -- No foreign keys reference idempiere_log today. If that changes, drop them

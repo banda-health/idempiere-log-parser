@@ -56,7 +56,7 @@ export const saveRecords = (grafana: pg.Pool, recordsToSave: IdempiereLog[]) => 
 		grafana.query(
 			`insert into ${process.env.GRAFANA_TABLE!} (${fieldsToSave.join(',')}) VALUES` +
 				valuesStatement +
-				' ON CONFLICT DO NOTHING',
+				' ON CONFLICT (log_time, query_type, query_name) DO NOTHING',
 			recordsWithValidQueryNames.flatMap((record) => [
 				record.logTime,
 				record.queryType,

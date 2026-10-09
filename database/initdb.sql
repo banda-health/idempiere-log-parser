@@ -14,7 +14,8 @@ CREATE TABLE idempiere_log
 	record_uu    uuid,
 	ad_user_id   numeric,
 	error_data   text,
-	CONSTRAINT idempiere_log_pk PRIMARY KEY (id)
+	CONSTRAINT idempiere_log_pk PRIMARY KEY (id),
+	CONSTRAINT idempiere_log_natural_key UNIQUE (log_time, query_type, query_name)
 );
 
 CREATE INDEX idempiere_log_time ON idempiere_log USING brin (log_time);

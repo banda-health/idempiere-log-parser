@@ -3,8 +3,8 @@
 -- (reads and writes continue). SET NOT NULL is catalog-only on PostgreSQL 12+
 -- once the CHECK has been validated.
 --
--- Do not create a unique index on (log_time, query_type, query_name).
--- That unique is what drops same-millisecond frontend Log rows.
+-- Unique on (log_time, query_type, query_name) is the dashboard index and
+-- the replay gate. Same-ms Log rows are already distinct via extra micros.
 
 ALTER TABLE idempiere_log
 	ADD CONSTRAINT idempiere_log_id_notnull CHECK (id IS NOT NULL) NOT VALID;
@@ -17,3 +17,7 @@ ALTER TABLE idempiere_log DROP CONSTRAINT idempiere_log_id_notnull;
 
 CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idempiere_log_id_uidx
 	ON idempiere_log (id);
+
+-- Built online so step 4 can DROP the old composite PK without a gap.
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idempiere_log_natural_key
+	ON idempiere_log (log_time, query_type, query_name);
