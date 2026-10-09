@@ -12,6 +12,13 @@ npm install
 ## Configuration
 Copy the `.env.example` file and rename it to `.env` and set the properties.
 
+New Grafana installs create `idempiere_log` with a surrogate `id` PK and
+`UNIQUE (log_time, query_type, query_name)` (`database/initdb.sql`). Production
+keeps the composite PK unless ops run `database/migrate-idempiere-log-pk.sql`
+manually — the parser never rewrites the PK on startup. Same-millisecond frontend
+`Log` rows stay `query_name = 'Log'` and are disambiguated by extra microseconds
+on `log_time`. Grafana alert SQL: `grafana-error-alerts.sql`.
+
 ## Set up a system process to run this
 Do the following:
 1. In `/lib/systemd/system/idempiere-log-parser.service`, create the `idempiere-log-parser.service` and populate it with the same contents as that file in this repository.

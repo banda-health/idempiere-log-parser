@@ -2,6 +2,7 @@
 
 CREATE TABLE idempiere_log
 (
+	id           bigserial NOT NULL,
 	log_time     timestamp NOT NULL,
 	query_type   varchar   NOT NULL,
 	query_name   varchar   NOT NULL,
@@ -13,7 +14,8 @@ CREATE TABLE idempiere_log
 	record_uu    uuid,
 	ad_user_id   numeric,
 	error_data   text,
-	CONSTRAINT idempiere_log_pk PRIMARY KEY (log_time, query_type, query_name)
+	CONSTRAINT idempiere_log_pk PRIMARY KEY (id),
+	CONSTRAINT idempiere_log_natural_key UNIQUE (log_time, query_type, query_name)
 );
 
 CREATE INDEX idempiere_log_time ON idempiere_log USING brin (log_time);

@@ -76,8 +76,15 @@ describe('saveRecords', () => {
 		);
 		expect(query).toHaveBeenNthCalledWith(
 			6,
-			expect.stringContaining('insert into idempiere_log (log_time,query_type,query_name,duration,variables,record_uu,error_data,user_context) VALUES'),
+			expect.stringContaining(
+				'insert into idempiere_log (log_time,query_type,query_name,duration,variables,record_uu,error_data,user_context) VALUES',
+			),
 			expect.arrayContaining(['Log']),
+		);
+		expect(query).toHaveBeenNthCalledWith(
+			6,
+			expect.stringContaining('ON CONFLICT (log_time, query_type, query_name) DO NOTHING'),
+			expect.any(Array),
 		);
 	});
 

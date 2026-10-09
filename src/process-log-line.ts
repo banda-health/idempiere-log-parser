@@ -1,5 +1,42 @@
+import { createHash } from 'crypto';
+
 function convertToSqlTimestamp(date: number) {
 	return new Date(date).toISOString().slice(0, 23).replace('T', ' ');
+}
+
+/** Extra microseconds so same-ms Log rows stay unique without renaming query_name. */
+function extraMicrosFromPayload(payload: string): string {
+	const digest = createHash('sha256').update(payload).digest();
+	return String(digest.readUInt32BE(0) % 1000).padStart(3, '0');
+}
+
+function logTimeForClientLog(date: number, payload: string): string {
+	return convertToSqlTimestamp(date) + extraMicrosFromPayload(payload);
+}
+
+function errorDataFromGraphqlErrors(graphqlErrors: unknown): string | undefined {
+	if (graphqlErrors == null) {
+		return undefined;
+	}
+	if (typeof graphqlErrors === 'string') {
+		const trimmed = graphqlErrors.trim();
+		return trimmed || undefined;
+	}
+	if (!Array.isArray(graphqlErrors)) {
+		return JSON.stringify(graphqlErrors);
+	}
+	const parts = graphqlErrors
+		.map((entry) => {
+			if (typeof entry === 'string') {
+				return entry;
+			}
+			if (entry && typeof entry === 'object' && 'message' in entry) {
+				return String((entry as { message: unknown }).message);
+			}
+			return JSON.stringify(entry);
+		})
+		.filter((part) => part.trim());
+	return parts.length ? parts.join('\n') : undefined;
 }
 
 export type IdempiereLog = {
@@ -75,8 +112,9 @@ export const processLogLine = (
 				'',
 			];
 		}
+		const payload = loggedData || '';
 		return {
-			logTime: convertToSqlTimestamp(logTime.getTime()),
+			logTime: logTimeForClientLog(logTime.getTime(), payload),
 			queryType: 'log',
 			transactionName: 'Log',
 			userContext: JSON.stringify({
@@ -159,11 +197,13 @@ export const processLogLine = (
 			warehouseId: warehouseId ? parseInt(warehouseId, 10) : undefined,
 		});
 	}
+	let graphqlErrorData: string | undefined;
 	if (variables) {
 		try {
 			// Try casting it to a valid JSON object
 			let parsedVariables = JSON.parse(variables);
 			recordUU = parsedVariables?.UU;
+			graphqlErrorData = errorDataFromGraphqlErrors(parsedVariables?.graphqlErrors);
 			variables = JSON.stringify(parsedVariables);
 		} catch {
 			// The cast failed, so just save it as a string
@@ -172,8 +212,9 @@ export const processLogLine = (
 		}
 	}
 
-	// Now prepare the data for saving to the DB
-	const errorDataToReturn = exceptionData.length ? [...exceptionData].join('\n') : undefined;
+	// Prefer graphqlErrors on the completion line over the racy exception buffer.
+	const errorDataToReturn =
+		graphqlErrorData || (exceptionData.length ? [...exceptionData].join('\n') : undefined);
 	exceptionData.length = 0;
 	// If nothing was set for the user's context information, all these should be 0 and we don't want to log that here (logged on the variables)
 	return {

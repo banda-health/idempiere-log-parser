@@ -99,6 +99,26 @@ describe('processLogLine', () => {
 			expect(result?.transactionName).toBe('Log');
 			expect(result?.userContext).toBe('{"clientId":100,"organizationId":0,"userId":1}');
 			expect(result?.variables).toBe('User action performed');
+			expect(result?.logTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6}$/);
+		});
+
+		it('keeps query_name Log and disambiguates same-millisecond distinct payloads', () => {
+			const first =
+				'10:30:45.123 INFO  [http-nio-8080-exec-1] LoggingMutation.Log: {"type":"error","data":{"incidentId":"AAA1","requestId":"r1"}}, userId: 42, clientId: 100, organizationId: 0, roleId: 5, warehouseId: 10';
+			const second =
+				'10:30:45.123 INFO  [http-nio-8080-exec-2] LoggingMutation.Log: {"type":"error","data":{"incidentId":"BBB2","requestId":"r2"}}, userId: 42, clientId: 100, organizationId: 0, roleId: 5, warehouseId: 10';
+			const replay =
+				'10:30:45.123 INFO  [http-nio-8080-exec-3] LoggingMutation.Log: {"type":"error","data":{"incidentId":"AAA1","requestId":"r1"}}, userId: 42, clientId: 100, organizationId: 0, roleId: 5, warehouseId: 10';
+
+			const a = processLogLine(testDate, first);
+			const b = processLogLine(testDate, second);
+			const again = processLogLine(testDate, replay);
+
+			expect(a?.transactionName).toBe('Log');
+			expect(b?.transactionName).toBe('Log');
+			expect(a?.logTime).not.toBe(b?.logTime);
+			expect(a?.logTime).toBe(again?.logTime);
+			expect(a?.logTime.slice(0, 23)).toBe(b?.logTime.slice(0, 23));
 		});
 
 		it('should process a log line with more context (userId, clientId, organizationId, roleId, warehouseId)', () => {
@@ -151,6 +171,22 @@ describe('processLogLine', () => {
 			expect(result3).toBeDefined();
 			expect(result3?.errorData).toContain('Database connection failed');
 			expect(result3?.errorData).toContain('at com.example.DatabaseService.connect');
+		});
+
+		it('prefers graphqlErrors on the completion line over the exception buffer', () => {
+			const exceptionLine =
+				'10:30:45.123 ERROR [http-nio-8080-exec-1] SimpleDataFetcherExceptionHandler.onException: leftover from a previous request';
+			processLogLine(testDate, exceptionLine);
+
+			const line =
+				'10:30:46.000 INFO  [http-nio-8080-exec-2] LoggingInstrumentation.onCompleted: query ChangeAccess( variables: {"requestId":"abc-123","graphqlErrors":[{"message":"Unauthorized"}]}, userId: 42, clientId: 100, organizationId: 0, roleId: 5, warehouseId: 10, execution time (ms): 12 ';
+
+			const result = processLogLine(testDate, line);
+
+			expect(result?.errorData).toBe('Unauthorized');
+			expect(result?.variables).toBe(
+				'{"requestId":"abc-123","graphqlErrors":[{"message":"Unauthorized"}]}',
+			);
 		});
 	});
 
@@ -645,13 +681,17 @@ describe('processLogLine', () => {
 					},
 				];
 
-				testCases.forEach((testCase, index) => {
+				testCases.forEach((testCase) => {
 					const result = processLogLine(testDate, testCase.line);
 
 					expect(result).toBeDefined();
 					expect(result?.queryType).toBe(testCase.expectedType);
 					expect(result?.transactionName).toBe(testCase.expectedName);
-					expect(result?.logTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
+					if (testCase.expectedType === 'log') {
+						expect(result?.logTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6}$/);
+					} else {
+						expect(result?.logTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
+					}
 				});
 			});
 
