@@ -1,33 +1,5 @@
-import { createHash } from 'crypto';
-
 function convertToSqlTimestamp(date: number) {
 	return new Date(date).toISOString().slice(0, 23).replace('T', ' ');
-}
-
-function fieldForHash(value: unknown): string {
-	if (value == null) {
-		return '';
-	}
-	return typeof value === 'string' ? value : JSON.stringify(value);
-}
-
-/** Deterministic identity for ingest. Distinct statements differ; a replay matches. */
-export function eventHashFor(record: IdempiereLog): string {
-	return createHash('sha256')
-		.update(
-			[
-				record.logTime,
-				record.queryType,
-				record.transactionName.trim(),
-				String(record.duration || 0),
-				fieldForHash(record.variables),
-				record.recordUU ?? '',
-				record.errorData ?? '',
-				record.userContext ?? '',
-			].join('\0'),
-			'utf8',
-		)
-		.digest('hex');
 }
 
 function errorDataFromGraphqlErrors(graphqlErrors: unknown): string | undefined {

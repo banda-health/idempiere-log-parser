@@ -1,4 +1,4 @@
-import { eventHashFor, processLogLine, IdempiereLog } from '../src/process-log-line';
+import { processLogLine, IdempiereLog } from '../src/process-log-line';
 
 describe('processLogLine', () => {
 	const testDate = { year: '2024', month: '01', day: '15' };
@@ -102,7 +102,7 @@ describe('processLogLine', () => {
 			expect(result?.logTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
 		});
 
-		it('gives distinct event hashes to same-millisecond Log payloads and the same hash on replay', () => {
+		it('keeps the same log_time for same-millisecond Log payloads and the same fields on replay', () => {
 			const first =
 				'10:30:45.123 INFO  [http-nio-8080-exec-1] LoggingMutation.Log: {"type":"error","data":{"incidentId":"AAA1","requestId":"r1"}}, userId: 42, clientId: 100, organizationId: 0, roleId: 5, warehouseId: 10';
 			const second =
@@ -117,8 +117,9 @@ describe('processLogLine', () => {
 			expect(a?.transactionName).toBe('Log');
 			expect(b?.transactionName).toBe('Log');
 			expect(a?.logTime).toBe(b?.logTime);
-			expect(eventHashFor(a!)).not.toBe(eventHashFor(b!));
-			expect(eventHashFor(a!)).toBe(eventHashFor(again!));
+			expect(a?.variables).not.toBe(b?.variables);
+			expect(a?.variables).toBe(again?.variables);
+			expect(a?.userContext).toBe(again?.userContext);
 		});
 
 		it('should process a log line with more context (userId, clientId, organizationId, roleId, warehouseId)', () => {
@@ -705,7 +706,7 @@ describe('processLogLine', () => {
 				expect(results[0]?.transactionName).toBe(results[1]?.transactionName);
 			});
 
-			it('gives distinct event hashes to same-millisecond GraphQL completions with different variables', () => {
+			it('keeps distinct payloads for same-millisecond GraphQL completions with different variables', () => {
 				const first =
 					'10:30:45.123 INFO  [http-nio-8080-exec-1] LoggingInstrumentation.onCompleted: query TestQuery( variables: {"id": "1"}, execution time (ms): 10 ';
 				const second =
@@ -716,7 +717,8 @@ describe('processLogLine', () => {
 
 				expect(a?.logTime).toBe(b?.logTime);
 				expect(a?.transactionName).toBe('TestQuery');
-				expect(eventHashFor(a!)).not.toBe(eventHashFor(b!));
+				expect(a?.variables).not.toBe(b?.variables);
+				expect(a?.duration).not.toBe(b?.duration);
 			});
 		});
 

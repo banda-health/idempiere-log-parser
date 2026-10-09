@@ -1,47 +1,70 @@
--- Online migration: surrogate id PK + event_hash unique + dashboard index.
--- Existing production tables have PRIMARY KEY (log_time, query_type, query_name).
--- That unique drops distinct same-millisecond rows. event_hash is the replay
--- gate; (log_time, query_type, query_name) stays as a non-unique index.
+-- Online migration: replace PRIMARY KEY (log_time, query_type, query_name)
+-- with PRIMARY KEY (event_hash). The hash is assigned in SQL (trigger /
+-- backfill). There is no surrogate id and no unique on the old triple.
 --
--- Do NOT use `ALTER TABLE idempiere_log ADD COLUMN id BIGSERIAL`.
--- BIGSERIAL rewrites every row under ACCESS EXCLUSIVE.
+-- Do NOT ADD COLUMN event_hash with a generated STORED expression — that
+-- rewrites the table under ACCESS EXCLUSIVE.
 --
---   1. This file — nullable id + event_hash + insert trigger
+--   1. This file — nullable event_hash + hash function + insert trigger
 --   2. migrate-idempiere-log-pk-backfill.sql — batched UPDATE + VACUUM
---   3. migrate-idempiere-log-pk-step3.sql — NOT VALID / VALIDATE / CONCURRENTLY
---   4. migrate-idempiere-log-pk-step4.sql — drop composite PK, attach PK (id)
---      and UNIQUE (event_hash)
+--   3. migrate-idempiere-log-pk-step3.sql — NOT NULL / unique index / dashboard index
+--   4. migrate-idempiere-log-pk-step4.sql — drop composite PK, attach PK (event_hash)
 --
--- Deploy the parser that writes event_hash after step 4. CREATE INDEX
--- CONCURRENTLY and VACUUM cannot run inside a transaction.
+-- Keep the trigger after step 4. CREATE INDEX CONCURRENTLY and VACUUM
+-- cannot run inside a transaction.
 
 BEGIN;
 SET LOCAL lock_timeout = '1s';
 
-ALTER TABLE idempiere_log ADD COLUMN IF NOT EXISTS id bigint;
-ALTER TABLE idempiere_log ADD COLUMN IF NOT EXISTS event_hash varchar(64);
+ALTER TABLE idempiere_log ADD COLUMN IF NOT EXISTS event_hash varchar(32);
 
-CREATE SEQUENCE IF NOT EXISTS idempiere_log_id_seq;
+CREATE OR REPLACE FUNCTION idempiere_log_event_hash(
+	p_log_time timestamp,
+	p_query_type varchar,
+	p_query_name varchar,
+	p_duration numeric,
+	p_variables jsonb,
+	p_record_uu uuid,
+	p_error_data text,
+	p_user_context jsonb
+) RETURNS text
+LANGUAGE sql
+AS $$
+	SELECT md5(
+		coalesce(p_log_time::text, '') || E'\x01' ||
+		coalesce(p_query_type, '') || E'\x01' ||
+		coalesce(p_query_name, '') || E'\x01' ||
+		coalesce(p_duration::text, '0') || E'\x01' ||
+		coalesce(p_variables::text, '') || E'\x01' ||
+		coalesce(p_record_uu::text, '') || E'\x01' ||
+		coalesce(p_error_data, '') || E'\x01' ||
+		coalesce(p_user_context::text, '')
+	);
+$$;
 
-CREATE OR REPLACE FUNCTION idempiere_log_assign_id()
+CREATE OR REPLACE FUNCTION idempiere_log_assign_event_hash()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-	IF NEW.id IS NULL THEN
-		NEW.id := nextval('idempiere_log_id_seq');
-	END IF;
-	IF NEW.event_hash IS NULL THEN
-		NEW.event_hash := md5(NEW.id::text);
-	END IF;
+	NEW.event_hash := idempiere_log_event_hash(
+		NEW.log_time,
+		NEW.query_type,
+		NEW.query_name,
+		NEW.duration,
+		NEW.variables,
+		NEW.record_uu,
+		NEW.error_data,
+		NEW.user_context
+	);
 	RETURN NEW;
 END;
 $$;
 
-DROP TRIGGER IF EXISTS idempiere_log_assign_id ON idempiere_log;
-CREATE TRIGGER idempiere_log_assign_id
+DROP TRIGGER IF EXISTS idempiere_log_assign_event_hash ON idempiere_log;
+CREATE TRIGGER idempiere_log_assign_event_hash
 	BEFORE INSERT OR UPDATE ON idempiere_log
 	FOR EACH ROW
-	EXECUTE PROCEDURE idempiere_log_assign_id();
+	EXECUTE PROCEDURE idempiere_log_assign_event_hash();
 
 COMMIT;

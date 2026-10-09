@@ -1,15 +1,11 @@
 -- Step 2 of migrate-idempiere-log-pk.sql
--- Install the batch function, then loop from psql (VACUUM cannot run in a function):
 --
 --   \i database/migrate-idempiere-log-pk-backfill.sql
---   SELECT idempiere_log_backfill_id_batch(1);
+--   SELECT idempiere_log_backfill_event_hash_batch(1);
 --   VACUUM idempiere_log;
 --   -- repeat until 0 rows
---
--- Historical event_hash values include id so the unique can be applied.
--- They will not match a later parser replay of the same file.
 
-CREATE OR REPLACE FUNCTION idempiere_log_backfill_id_batch(p_days numeric DEFAULT 1)
+CREATE OR REPLACE FUNCTION idempiere_log_backfill_event_hash_batch(p_days numeric DEFAULT 1)
 RETURNS bigint
 LANGUAGE plpgsql
 AS $$
@@ -24,7 +20,7 @@ BEGIN
 
 	SELECT min(log_time) INTO v_start
 	FROM idempiere_log
-	WHERE id IS NULL OR event_hash IS NULL;
+	WHERE event_hash IS NULL;
 
 	IF v_start IS NULL THEN
 		RETURN 0;
@@ -33,13 +29,16 @@ BEGIN
 	v_end := v_start + (p_days || ' days')::interval;
 
 	UPDATE idempiere_log
-	SET id = COALESCE(id, nextval('idempiere_log_id_seq'))
-	WHERE (id IS NULL OR event_hash IS NULL)
-	  AND log_time >= v_start
-	  AND log_time < v_end;
-
-	UPDATE idempiere_log
-	SET event_hash = md5(id::text)
+	SET event_hash = idempiere_log_event_hash(
+		log_time,
+		query_type,
+		query_name,
+		duration,
+		variables,
+		record_uu,
+		error_data,
+		user_context
+	)
 	WHERE event_hash IS NULL
 	  AND log_time >= v_start
 	  AND log_time < v_end;

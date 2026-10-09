@@ -1,6 +1,6 @@
 import pg from 'pg';
 import { extractLogDimensions } from './extract-log-dimensions';
-import { eventHashFor, IdempiereLog } from './process-log-line';
+import { IdempiereLog } from './process-log-line';
 
 const queryNameTable = process.env.GRAFANA_QUERY_NAME_TABLE || 'idempiere_log_query_name';
 const clientTable = 'idempiere_log_client';
@@ -38,7 +38,6 @@ export const saveRecords = (grafana: pg.Pool, recordsToSave: IdempiereLog[]) => 
 		'record_uu',
 		'error_data',
 		'user_context',
-		'event_hash',
 	];
 
 	const valuesStatement = recordsWithValidQueryNames
@@ -67,7 +66,6 @@ export const saveRecords = (grafana: pg.Pool, recordsToSave: IdempiereLog[]) => 
 				record.recordUU,
 				record.errorData || null,
 				record.userContext || null,
-				eventHashFor(record),
 			]),
 		),
 	]);
