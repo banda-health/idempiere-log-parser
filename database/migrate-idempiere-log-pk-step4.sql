@@ -1,7 +1,7 @@
 -- Step 4 of migrate-idempiere-log-pk.sql — short ACCESS EXCLUSIVE.
--- Retry the whole file if lock_timeout fires (long transaction holding the table).
--- DROP CONSTRAINT on the old composite PK drops its index; the
--- CONCURRENTLY-built natural-key unique from step 3 replaces it.
+-- Retry the whole file if lock_timeout fires.
+-- The unique index on event_hash from step 3 stays live while the old
+-- composite PK is dropped, so replay protection does not gap.
 
 BEGIN;
 SET LOCAL lock_timeout = '1s';
@@ -9,12 +9,12 @@ SET LOCAL lock_timeout = '1s';
 ALTER TABLE idempiere_log DROP CONSTRAINT idempiere_log_pk;
 
 ALTER TABLE idempiere_log
-	ADD CONSTRAINT idempiere_log_natural_key
-	UNIQUE USING INDEX idempiere_log_natural_key;
-
-ALTER TABLE idempiere_log
 	ADD CONSTRAINT idempiere_log_pk
 	PRIMARY KEY USING INDEX idempiere_log_id_uidx;
+
+ALTER TABLE idempiere_log
+	ADD CONSTRAINT idempiere_log_event_hash_key
+	UNIQUE USING INDEX idempiere_log_event_hash_uidx;
 
 ALTER TABLE idempiere_log
 	ALTER COLUMN id SET DEFAULT nextval('idempiere_log_id_seq');

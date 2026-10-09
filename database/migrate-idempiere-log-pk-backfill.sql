@@ -6,9 +6,8 @@
 --   VACUUM idempiere_log;
 --   -- repeat until 0 rows
 --
--- Batch by oldest unfilled log_time day (BRIN on log_time). If one day is
--- huge, pass a smaller window: idempiere_log_backfill_id_batch(0.25)
--- is 6 hours. Deadlock with the parser is possible; just rerun the batch.
+-- Historical event_hash values include id so the unique can be applied.
+-- They will not match a later parser replay of the same file.
 
 CREATE OR REPLACE FUNCTION idempiere_log_backfill_id_batch(p_days numeric DEFAULT 1)
 RETURNS bigint
@@ -25,7 +24,7 @@ BEGIN
 
 	SELECT min(log_time) INTO v_start
 	FROM idempiere_log
-	WHERE id IS NULL;
+	WHERE id IS NULL OR event_hash IS NULL;
 
 	IF v_start IS NULL THEN
 		RETURN 0;
@@ -34,8 +33,14 @@ BEGIN
 	v_end := v_start + (p_days || ' days')::interval;
 
 	UPDATE idempiere_log
-	SET id = nextval('idempiere_log_id_seq')
-	WHERE id IS NULL
+	SET id = COALESCE(id, nextval('idempiere_log_id_seq'))
+	WHERE (id IS NULL OR event_hash IS NULL)
+	  AND log_time >= v_start
+	  AND log_time < v_end;
+
+	UPDATE idempiere_log
+	SET event_hash = md5(id::text)
+	WHERE event_hash IS NULL
 	  AND log_time >= v_start
 	  AND log_time < v_end;
 

@@ -14,11 +14,13 @@ CREATE TABLE idempiere_log
 	record_uu    uuid,
 	ad_user_id   numeric,
 	error_data   text,
+	event_hash   varchar(64) NOT NULL,
 	CONSTRAINT idempiere_log_pk PRIMARY KEY (id),
-	CONSTRAINT idempiere_log_natural_key UNIQUE (log_time, query_type, query_name)
+	CONSTRAINT idempiere_log_event_hash_key UNIQUE (event_hash)
 );
 
 CREATE INDEX idempiere_log_time ON idempiere_log USING brin (log_time);
+CREATE INDEX idempiere_log_natural ON idempiere_log (log_time, query_type, query_name);
 
 CREATE TABLE idempiere_log_query_name
 (

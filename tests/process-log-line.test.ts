@@ -1,4 +1,4 @@
-import { processLogLine, IdempiereLog } from '../src/process-log-line';
+import { eventHashFor, processLogLine, IdempiereLog } from '../src/process-log-line';
 
 describe('processLogLine', () => {
 	const testDate = { year: '2024', month: '01', day: '15' };
@@ -99,10 +99,10 @@ describe('processLogLine', () => {
 			expect(result?.transactionName).toBe('Log');
 			expect(result?.userContext).toBe('{"clientId":100,"organizationId":0,"userId":1}');
 			expect(result?.variables).toBe('User action performed');
-			expect(result?.logTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6}$/);
+			expect(result?.logTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
 		});
 
-		it('keeps query_name Log and disambiguates same-millisecond distinct payloads', () => {
+		it('gives distinct event hashes to same-millisecond Log payloads and the same hash on replay', () => {
 			const first =
 				'10:30:45.123 INFO  [http-nio-8080-exec-1] LoggingMutation.Log: {"type":"error","data":{"incidentId":"AAA1","requestId":"r1"}}, userId: 42, clientId: 100, organizationId: 0, roleId: 5, warehouseId: 10';
 			const second =
@@ -116,9 +116,9 @@ describe('processLogLine', () => {
 
 			expect(a?.transactionName).toBe('Log');
 			expect(b?.transactionName).toBe('Log');
-			expect(a?.logTime).not.toBe(b?.logTime);
-			expect(a?.logTime).toBe(again?.logTime);
-			expect(a?.logTime.slice(0, 23)).toBe(b?.logTime.slice(0, 23));
+			expect(a?.logTime).toBe(b?.logTime);
+			expect(eventHashFor(a!)).not.toBe(eventHashFor(b!));
+			expect(eventHashFor(a!)).toBe(eventHashFor(again!));
 		});
 
 		it('should process a log line with more context (userId, clientId, organizationId, roleId, warehouseId)', () => {
@@ -687,11 +687,7 @@ describe('processLogLine', () => {
 					expect(result).toBeDefined();
 					expect(result?.queryType).toBe(testCase.expectedType);
 					expect(result?.transactionName).toBe(testCase.expectedName);
-					if (testCase.expectedType === 'log') {
-						expect(result?.logTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6}$/);
-					} else {
-						expect(result?.logTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
-					}
+					expect(result?.logTime).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
 				});
 			});
 
@@ -707,6 +703,20 @@ describe('processLogLine', () => {
 				expect(results[0]?.logTime).not.toBe(results[1]?.logTime);
 				expect(results[0]?.queryType).toBe(results[1]?.queryType);
 				expect(results[0]?.transactionName).toBe(results[1]?.transactionName);
+			});
+
+			it('gives distinct event hashes to same-millisecond GraphQL completions with different variables', () => {
+				const first =
+					'10:30:45.123 INFO  [http-nio-8080-exec-1] LoggingInstrumentation.onCompleted: query TestQuery( variables: {"id": "1"}, execution time (ms): 10 ';
+				const second =
+					'10:30:45.123 INFO  [http-nio-8080-exec-2] LoggingInstrumentation.onCompleted: query TestQuery( variables: {"id": "2"}, execution time (ms): 11 ';
+
+				const a = processLogLine(testDate, first);
+				const b = processLogLine(testDate, second);
+
+				expect(a?.logTime).toBe(b?.logTime);
+				expect(a?.transactionName).toBe('TestQuery');
+				expect(eventHashFor(a!)).not.toBe(eventHashFor(b!));
 			});
 		});
 

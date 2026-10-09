@@ -1,33 +1,25 @@
--- Online surrogate-PK migration for an existing idempiere_log that still has
--- PRIMARY KEY (log_time, query_type, query_name).
---
--- Replaces the composite PRIMARY KEY with a surrogate id PK and keeps
--- UNIQUE (log_time, query_type, query_name) as the dashboard / replay key.
--- Same-ms frontend Log rows stay unique via extra microseconds on log_time.
+-- Online migration: surrogate id PK + event_hash unique + dashboard index.
+-- Existing production tables have PRIMARY KEY (log_time, query_type, query_name).
+-- That unique drops distinct same-millisecond rows. event_hash is the replay
+-- gate; (log_time, query_type, query_name) stays as a non-unique index.
 --
 -- Do NOT use `ALTER TABLE idempiere_log ADD COLUMN id BIGSERIAL`.
--- BIGSERIAL is bigint NOT NULL DEFAULT nextval(...). A volatile default
--- rewrites every row under ACCESS EXCLUSIVE, then ADD UNIQUE / ADD PRIMARY
--- KEY builds indexes under the same lock. On millions of JSONB rows that is
--- minutes to hours of blocked parser inserts and Grafana queries.
+-- BIGSERIAL rewrites every row under ACCESS EXCLUSIVE.
 --
--- Follow Laurenz Albe's int→bigint recipe (Cybertec, 2026), adapted to *add*
--- a bigint id rather than widen an existing integer PK:
--- https://www.cybertec-postgresql.com/en/integer-overflow-in-sequence-generated-primary-keys/
---
---   1. This file — nullable column + trigger (metadata, lock_timeout 1s)
---   2. migrate-idempiere-log-pk-backfill.sql — batched UPDATE + VACUUM (online)
+--   1. This file — nullable id + event_hash + insert trigger
+--   2. migrate-idempiere-log-pk-backfill.sql — batched UPDATE + VACUUM
 --   3. migrate-idempiere-log-pk-step3.sql — NOT VALID / VALIDATE / CONCURRENTLY
---   4. migrate-idempiere-log-pk-step4.sql — attach PK (id) + UNIQUE natural key
+--   4. migrate-idempiere-log-pk-step4.sql — drop composite PK, attach PK (id)
+--      and UNIQUE (event_hash)
 --
--- CREATE INDEX CONCURRENTLY and VACUUM cannot run inside a transaction.
--- No foreign keys reference idempiere_log today. If that changes, drop them
--- before step 4 and recreate NOT VALID + VALIDATE afterward.
+-- Deploy the parser that writes event_hash after step 4. CREATE INDEX
+-- CONCURRENTLY and VACUUM cannot run inside a transaction.
 
 BEGIN;
 SET LOCAL lock_timeout = '1s';
 
 ALTER TABLE idempiere_log ADD COLUMN IF NOT EXISTS id bigint;
+ALTER TABLE idempiere_log ADD COLUMN IF NOT EXISTS event_hash varchar(64);
 
 CREATE SEQUENCE IF NOT EXISTS idempiere_log_id_seq;
 
@@ -38,6 +30,9 @@ AS $$
 BEGIN
 	IF NEW.id IS NULL THEN
 		NEW.id := nextval('idempiere_log_id_seq');
+	END IF;
+	IF NEW.event_hash IS NULL THEN
+		NEW.event_hash := md5(NEW.id::text);
 	END IF;
 	RETURN NEW;
 END;

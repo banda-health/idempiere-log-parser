@@ -12,23 +12,29 @@ npm install
 ## Configuration
 Copy the `.env.example` file and rename it to `.env` and set the properties.
 
-New Grafana installs create `idempiere_log` with a surrogate `id` PK **and**
-`UNIQUE (log_time, query_type, query_name)` (`database/initdb.sql`). The unique
-is the dashboard index and the replay gate (`ON CONFLICT … DO NOTHING`).
+New Grafana installs create `idempiere_log` with `PRIMARY KEY (id)`,
+`UNIQUE (event_hash)`, and a non-unique index on
+`(log_time, query_type, query_name)` (`database/initdb.sql`).
 
-Same-millisecond frontend `Log` rows all share `query_name = 'Log'`. Distinct
-payloads get extra microseconds on `log_time` (`sha256(payload) % 1000`) so
-they do not collide. The same payload hashes to the same extra micros, so a
-replay hits the unique and is skipped.
+`event_hash` is `sha256` of the inserted fields (time, type, name, duration,
+payload, record UU, error data, user context). Distinct statements get
+distinct hashes, so they never collide — including two `Log` or two
+`GetPatient` rows in the same millisecond. The same line hashes the same
+way, so `ON CONFLICT (event_hash) DO NOTHING` skips a replay.
 
-Production still has the composite PK until ops run the online migration
-(do **not** `ADD COLUMN id BIGSERIAL` — that rewrites the table under
-`ACCESS EXCLUSIVE`):
+The triple index is for dashboard filters only. Do not make it unique.
 
-1. `database/migrate-idempiere-log-pk.sql` — nullable `id` + insert trigger
+Production still has `PRIMARY KEY (log_time, query_type, query_name)` until
+ops finish the online migration (do **not** `ADD COLUMN id BIGSERIAL`).
+Deploy the parser that writes `event_hash` **after** step 4:
+
+1. `database/migrate-idempiere-log-pk.sql` — nullable `id` + `event_hash` + trigger
 2. `database/migrate-idempiere-log-pk-backfill.sql` — batched `UPDATE` + `VACUUM`
-3. `database/migrate-idempiere-log-pk-step3.sql` — `NOT VALID` / `VALIDATE` / unique on `id` and the natural key
-4. `database/migrate-idempiere-log-pk-step4.sql` — drop the old PK, attach `PRIMARY KEY (id)` and `UNIQUE` on the natural key
+3. `database/migrate-idempiere-log-pk-step3.sql` — `NOT NULL` / unique on `id` and `event_hash` / dashboard index
+4. `database/migrate-idempiere-log-pk-step4.sql` — drop the composite PK, attach `PRIMARY KEY (id)` and `UNIQUE (event_hash)`
+
+Historical rows backfilled in step 2 hash from `id`, so replaying a file that
+was ingested before `event_hash` existed can insert those lines again.
 
 Grafana alert SQL: `grafana-error-alerts.sql`.
 

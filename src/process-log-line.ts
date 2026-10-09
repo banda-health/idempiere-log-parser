@@ -4,14 +4,30 @@ function convertToSqlTimestamp(date: number) {
 	return new Date(date).toISOString().slice(0, 23).replace('T', ' ');
 }
 
-/** Extra microseconds so same-ms Log rows stay unique without renaming query_name. */
-function extraMicrosFromPayload(payload: string): string {
-	const digest = createHash('sha256').update(payload).digest();
-	return String(digest.readUInt32BE(0) % 1000).padStart(3, '0');
+function fieldForHash(value: unknown): string {
+	if (value == null) {
+		return '';
+	}
+	return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-function logTimeForClientLog(date: number, payload: string): string {
-	return convertToSqlTimestamp(date) + extraMicrosFromPayload(payload);
+/** Deterministic identity for ingest. Distinct statements differ; a replay matches. */
+export function eventHashFor(record: IdempiereLog): string {
+	return createHash('sha256')
+		.update(
+			[
+				record.logTime,
+				record.queryType,
+				record.transactionName.trim(),
+				String(record.duration || 0),
+				fieldForHash(record.variables),
+				record.recordUU ?? '',
+				record.errorData ?? '',
+				record.userContext ?? '',
+			].join('\0'),
+			'utf8',
+		)
+		.digest('hex');
 }
 
 function errorDataFromGraphqlErrors(graphqlErrors: unknown): string | undefined {
@@ -112,9 +128,8 @@ export const processLogLine = (
 				'',
 			];
 		}
-		const payload = loggedData || '';
 		return {
-			logTime: logTimeForClientLog(logTime.getTime(), payload),
+			logTime: convertToSqlTimestamp(logTime.getTime()),
 			queryType: 'log',
 			transactionName: 'Log',
 			userContext: JSON.stringify({

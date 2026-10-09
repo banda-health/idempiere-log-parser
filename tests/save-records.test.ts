@@ -1,5 +1,5 @@
 import { saveRecords } from '../src/save-records';
-import { IdempiereLog } from '../src/process-log-line';
+import { eventHashFor, IdempiereLog } from '../src/process-log-line';
 
 describe('saveRecords', () => {
 	it('sends query name insert statement with ON CONFLICT DO NOTHING', async () => {
@@ -77,13 +77,13 @@ describe('saveRecords', () => {
 		expect(query).toHaveBeenNthCalledWith(
 			6,
 			expect.stringContaining(
-				'insert into idempiere_log (log_time,query_type,query_name,duration,variables,record_uu,error_data,user_context) VALUES',
+				'insert into idempiere_log (log_time,query_type,query_name,duration,variables,record_uu,error_data,user_context,event_hash) VALUES',
 			),
-			expect.arrayContaining(['Log']),
+			expect.arrayContaining(['Log', eventHashFor(record)]),
 		);
 		expect(query).toHaveBeenNthCalledWith(
 			6,
-			expect.stringContaining('ON CONFLICT (log_time, query_type, query_name) DO NOTHING'),
+			expect.stringContaining('ON CONFLICT (event_hash) DO NOTHING'),
 			expect.any(Array),
 		);
 	});
@@ -120,8 +120,8 @@ describe('saveRecords', () => {
 		);
 		expect(query).toHaveBeenNthCalledWith(
 			2,
-			expect.stringContaining('insert into idempiere_log (log_time,query_type,query_name,duration,variables,record_uu,error_data,user_context) VALUES'),
-			expect.arrayContaining(['getPatient']),
+			expect.stringContaining('insert into idempiere_log (log_time,query_type,query_name,duration,variables,record_uu,error_data,user_context,event_hash) VALUES'),
+			expect.arrayContaining(['getPatient', eventHashFor(validRecord)]),
 		);
 		expect(query).toHaveBeenNthCalledWith(
 			2,
