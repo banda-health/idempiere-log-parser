@@ -1,9 +1,11 @@
 -- Step 2 of migrate-idempiere-log-pk.sql
 --
 --   \i database/migrate-idempiere-log-pk-backfill.sql
---   SELECT idempiere_log_backfill_event_hash_batch(1);
+--   CALL idempiere_log_backfill_event_hash_all(1);
 --   VACUUM idempiere_log;
---   -- repeat until 0 rows
+--
+-- VACUUM cannot run inside the procedure. One vacuum at the end is enough
+-- unless dead tuples get large; then cancel, VACUUM, and CALL again.
 
 CREATE OR REPLACE FUNCTION idempiere_log_backfill_event_hash_batch(p_days numeric DEFAULT 1)
 RETURNS bigint
@@ -45,5 +47,22 @@ BEGIN
 
 	GET DIAGNOSTICS v_updated = ROW_COUNT;
 	RETURN v_updated;
+END;
+$$;
+
+CREATE OR REPLACE PROCEDURE idempiere_log_backfill_event_hash_all(p_days numeric DEFAULT 1)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+	v_updated bigint;
+	v_batches int := 0;
+BEGIN
+	LOOP
+		v_updated := idempiere_log_backfill_event_hash_batch(p_days);
+		v_batches := v_batches + 1;
+		RAISE NOTICE '% batch % updated % rows', clock_timestamp(), v_batches, v_updated;
+		COMMIT;
+		EXIT WHEN v_updated = 0;
+	END LOOP;
 END;
 $$;

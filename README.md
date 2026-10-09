@@ -29,7 +29,7 @@ ops finish the online migration (do **not** add a generated `STORED` column —
 that rewrites the table):
 
 1. `database/migrate-idempiere-log-pk.sql` — nullable `event_hash` + SQL hash trigger
-2. `database/migrate-idempiere-log-pk-backfill.sql` — batched `UPDATE` + `VACUUM`
+2. `database/migrate-idempiere-log-pk-backfill.sql` then `CALL idempiere_log_backfill_event_hash_all(1);` and one `VACUUM idempiere_log` (see `migrate-idempiere-log-pk-backfill-loop.sql`)
 3. `database/migrate-idempiere-log-pk-step3.sql` — `NOT NULL` / unique on `event_hash` / dashboard index
 4. `database/migrate-idempiere-log-pk-step4.sql` — drop the composite PK, attach `PRIMARY KEY (event_hash)`
 
