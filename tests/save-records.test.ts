@@ -83,9 +83,10 @@ describe('saveRecords', () => {
 		);
 		expect(query).toHaveBeenNthCalledWith(
 			6,
-			expect.stringContaining('ON CONFLICT (log_time, query_type, query_name) DO NOTHING'),
+			expect.stringContaining('ON CONFLICT DO NOTHING'),
 			expect.any(Array),
 		);
+		expect(query.mock.calls[5][0]).not.toContain('ON CONFLICT (log_time');
 	});
 
 	it("doesn't save records with bad query names", async () => {
