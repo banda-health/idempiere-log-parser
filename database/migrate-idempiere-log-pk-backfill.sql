@@ -50,19 +50,53 @@ BEGIN
 END;
 $$;
 
+-- Walks log_time from min to max (PK/BRIN). Do not use
+-- idempiere_log_backfill_event_hash_batch() in a loop: each call does
+-- min(log_time) WHERE event_hash IS NULL, which seq-scans the heap.
 CREATE OR REPLACE PROCEDURE idempiere_log_backfill_event_hash_all(p_days numeric DEFAULT 1)
 LANGUAGE plpgsql
 AS $$
 DECLARE
+	v_start timestamp;
+	v_end timestamp;
+	v_stop timestamp;
 	v_updated bigint;
 	v_batches int := 0;
 BEGIN
-	LOOP
-		v_updated := idempiere_log_backfill_event_hash_batch(p_days);
+	IF p_days IS NULL OR p_days <= 0 THEN
+		RAISE EXCEPTION 'p_days must be positive';
+	END IF;
+
+	SELECT min(log_time), max(log_time) INTO v_start, v_stop
+	FROM idempiere_log;
+
+	IF v_start IS NULL THEN
+		RETURN;
+	END IF;
+
+	WHILE v_start <= v_stop LOOP
+		v_end := v_start + (p_days || ' days')::interval;
+
+		UPDATE idempiere_log
+		SET event_hash = idempiere_log_event_hash(
+			log_time,
+			query_type,
+			query_name,
+			duration,
+			variables,
+			record_uu,
+			error_data,
+			user_context
+		)
+		WHERE event_hash IS NULL
+		  AND log_time >= v_start
+		  AND log_time < v_end;
+
+		GET DIAGNOSTICS v_updated = ROW_COUNT;
 		v_batches := v_batches + 1;
-		RAISE NOTICE '% batch % updated % rows', clock_timestamp(), v_batches, v_updated;
+		RAISE NOTICE '% % to % updated %', clock_timestamp(), v_start, v_end, v_updated;
 		COMMIT;
-		EXIT WHEN v_updated = 0;
+		v_start := v_end;
 	END LOOP;
 END;
 $$;
